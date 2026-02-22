@@ -1,4 +1,4 @@
-# Catppuccin Mocha — z13gui theme
+# Catppuccin Frappe — z13gui theme
 # Copy this file to ~/.config/z13gui/theme.toml to use it.
 # All values are CSS hex color strings: #rrggbb
 # Changes take effect the next time z13gui starts.
@@ -8,38 +8,38 @@
 # in the theme picker when this file is used as a custom theme.
 
 # Accent color — active buttons, slider fill, checked states
-accent = "#cba6f7"
+accent = "#ca9ee6"
 
 # Drawer background
-background = "#1e1e2e"
+background = "#303446"
 
 # Surface color — button and row backgrounds
-surface = "#313244"
+surface = "#414559"
 
 # Alternate surface — hover state background
-surface_alt = "#45475a"
+surface_alt = "#51576d"
 
 # Primary text color
-text = "#cdd6f4"
+text = "#c6d0f5"
 
 # Dim text color — section labels, secondary descriptions
-text_dim = "#a6adc8"
+text_dim = "#a5adce"
 
 # Border color — window outline and separators
-border = "#585b70"
+border = "#626880"
 
 [accents]
-rosewater = "#f5e0dc"
-flamingo = "#f2cdcd"
-pink = "#f5c2e7"
-mauve = "#cba6f7"
-red = "#f38ba8"
-maroon = "#eba0ac"
-peach = "#fab387"
-yellow = "#f9e2af"
-green = "#a6e3a1"
-teal = "#94e2d5"
-sky = "#89dceb"
-sapphire = "#74c7ec"
-blue = "#89b4fa"
-lavender = "#b4befe"
+rosewater = "#f2d5cf"
+flamingo = "#eebebe"
+pink = "#f4b8e4"
+mauve = "#ca9ee6"
+red = "#e78284"
+maroon = "#ea999c"
+peach = "#ef9f76"
+yellow = "#e5c890"
+green = "#a6d189"
+teal = "#81c8be"
+sky = "#99d1db"
+sapphire = "#85c1dc"
+blue = "#8caaee"
+lavender = "#babbf1"

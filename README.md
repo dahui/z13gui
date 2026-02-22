@@ -79,7 +79,7 @@ Changes are sent to the z13ctl daemon immediately and persist across reboots.
 
 ## Themes
 
-z13gui ships with 9 built-in themes (6 dark, 3 light). A theme picker button
+z13gui ships with 15 built-in themes (8 dark, 7 light). A theme picker button
 at the bottom of the drawer lets you switch between them. Catppuccin themes
 also support 14 accent color variants.
 

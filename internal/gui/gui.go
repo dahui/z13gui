@@ -63,6 +63,11 @@ type Window struct {
 
 	syncing    bool        // true while syncState is updating widgets; suppresses sendApply
 	applyTimer *time.Timer // debounce for continuous inputs (brightness, color wheel)
+
+	// Custom theme state (set when theme.toml exists).
+	isCustomTheme bool
+	customColors  theme.Colors
+	customAccents []theme.Accent
 }
 
 // New creates the overlay window and attaches it to app. Called from the
@@ -266,7 +271,23 @@ func (w *Window) loadCSS() {
 	switch {
 	case fileExists(tomlPath):
 		data, _ := os.ReadFile(tomlPath)
-		w.themeProvider.LoadFromString(theme.BuildThemeCSS(theme.ParseThemeTOML(data), defaultThemeCSS))
+		colors, accents := theme.ParseThemeTOMLFull(data)
+		w.isCustomTheme = true
+		w.customColors = colors
+		w.customAccents = accents
+		// Restore the user's last accent selection from config.toml.
+		if len(accents) > 0 {
+			cfg := theme.LoadAppConfig()
+			if cfg.Accent != "" {
+				for _, a := range accents {
+					if a.ID == cfg.Accent {
+						colors.Accent = a.Hex
+						break
+					}
+				}
+			}
+		}
+		w.themeProvider.LoadFromString(theme.BuildThemeCSS(colors, defaultThemeCSS))
 	case fileExists(cssPath):
 		data, _ := os.ReadFile(cssPath)
 		w.themeProvider.LoadFromString(string(data))
@@ -309,6 +330,27 @@ func (w *Window) applyTheme(id, accentID string) {
 	w.themeProvider.LoadFromString(theme.BuildThemeCSS(colors, defaultThemeCSS))
 	gtk.StyleContextAddProviderForDisplay(display, w.themeProvider, gtk.STYLE_PROVIDER_PRIORITY_USER)
 	theme.SaveAppConfig(theme.AppConfig{Theme: id, Accent: accentID})
+}
+
+// applyCustomAccent hot-swaps the accent color for a custom theme.toml theme.
+// The accentID must match an entry in w.customAccents. The selection is saved
+// to config.toml so it persists across restarts.
+func (w *Window) applyCustomAccent(accentID string) {
+	colors := w.customColors
+	for _, a := range w.customAccents {
+		if a.ID == accentID {
+			colors.Accent = a.Hex
+			break
+		}
+	}
+	display := gdk.DisplayGetDefault()
+	if w.themeProvider != nil {
+		gtk.StyleContextRemoveProviderForDisplay(display, w.themeProvider)
+	}
+	w.themeProvider = gtk.NewCSSProvider()
+	w.themeProvider.LoadFromString(theme.BuildThemeCSS(colors, defaultThemeCSS))
+	gtk.StyleContextAddProviderForDisplay(display, w.themeProvider, gtk.STYLE_PROVIDER_PRIORITY_USER)
+	theme.SaveAppConfig(theme.AppConfig{Accent: accentID})
 }
 
 // fileExists returns true if a file exists at the given path.

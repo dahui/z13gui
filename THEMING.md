@@ -1,7 +1,7 @@
 # Theming
 
 z13gui supports custom color themes through a simple TOML configuration file.
-You can also select from 9 built-in themes using the in-app theme picker.
+You can also select from 15 built-in themes using the in-app theme picker.
 
 ## Table of Contents
 
@@ -9,6 +9,7 @@ You can also select from 9 built-in themes using the in-app theme picker.
 - [Built-in Themes](#built-in-themes)
 - [Choosing a Built-in Theme](#choosing-a-built-in-theme)
 - [Creating a Custom Theme](#creating-a-custom-theme)
+  - [Accent Variants](#accent-variants)
 - [Color Reference](#color-reference)
 - [Accent Colors](#accent-colors)
 - [Full CSS Override](#full-css-override)
@@ -31,15 +32,21 @@ theme picker selection. Delete or rename it to go back to built-in themes.
 
 | ID | Name | Type | Accents |
 |----|------|------|---------|
+| `catppuccin-frappe` | Catppuccin Frappe | dark | 14 variants |
+| `catppuccin-latte` | Catppuccin Latte | light | 14 variants |
+| `catppuccin-macchiato` | Catppuccin Macchiato | dark | 14 variants |
+| `catppuccin-mocha` | Catppuccin Mocha | dark | 14 variants |
+| `everforest-light` | Everforest Light | light | no |
+| `github-light` | GitHub Light | light | no |
+| `gruvbox-dark` | Gruvbox Dark | dark | no |
+| `gruvbox-light` | Gruvbox Light | light | no |
+| `nord` | Nord | dark | no |
+| `one-light` | One Light | light | no |
 | `rog-dark` | ROG Dark | dark | no |
 | `rog-neon` | ROG Neon | dark | no |
-| `catppuccin-mocha` | Catppuccin Mocha | dark | 14 variants |
-| `nord` | Nord | dark | no |
-| `gruvbox-dark` | Gruvbox Dark | dark | no |
-| `tokyo-night` | Tokyo Night | dark | no |
-| `catppuccin-latte` | Catppuccin Latte | light | 14 variants |
-| `solarized-light` | Solarized Light | light | no |
 | `rose-pine-dawn` | Rose Pine Dawn | light | no |
+| `solarized-light` | Solarized Light | light | no |
+| `tokyo-night` | Tokyo Night | dark | no |
 
 You can list all built-in themes from the command line:
 
@@ -113,6 +120,39 @@ themes.
 
 Changes to `theme.toml` take effect the next time z13gui starts.
 
+### Accent Variants
+
+Custom themes can optionally define accent color variants. These appear as
+colored dots in the theme picker, just like built-in Catppuccin themes. Add an
+`[accents]` section after the color keys:
+
+```toml
+accent = "#5294e2"
+background = "#1b2838"
+surface = "#253449"
+surface_alt = "#2e3f55"
+text = "#d3dae3"
+text_dim = "#7c8fa0"
+border = "#3b5068"
+
+[accents]
+blue = "#5294e2"
+teal = "#2eb398"
+purple = "#9b59b6"
+orange = "#e67e22"
+```
+
+Each line in the `[accents]` section is `id = "#hex"`. The ID is used as the
+tooltip label and saved to `config.toml` when the user clicks a dot. Accent
+variants only change the `accent` color -- all other colors stay the same.
+
+The top-level `accent` key sets the default accent used when no variant is
+selected. Your last accent selection is saved to `config.toml` and restored
+on restart.
+
+The `[accents]` section is entirely optional. If omitted, the theme works the
+same as before -- a single fixed accent color with no picker dots.
+
 ## Color Reference
 
 | Key | CSS Variable | What it controls |
@@ -132,9 +172,9 @@ drawer itself.
 
 ## Accent Colors
 
-Some built-in themes offer accent color variants. Currently this applies to the
-two Catppuccin themes (Mocha and Latte), each of which supports the 14 official
-Catppuccin accent colors.
+Some built-in themes offer accent color variants. All four Catppuccin themes
+(Mocha, Macchiato, Frappe, and Latte) support the 14 official Catppuccin accent
+colors.
 
 You can set the accent in `config.toml`:
 
@@ -145,28 +185,28 @@ accent = "sapphire"
 
 **Available accent IDs:**
 
-| ID | Mocha | Latte |
-|----|-------|-------|
-| `rosewater` | `#f5e0dc` | `#dc8a78` |
-| `flamingo` | `#f2cdcd` | `#dd7878` |
-| `pink` | `#f5c2e7` | `#ea76cb` |
-| `mauve` | `#cba6f7` | `#8839ef` |
-| `red` | `#f38ba8` | `#d20f39` |
-| `maroon` | `#eba0ac` | `#e64553` |
-| `peach` | `#fab387` | `#fe640b` |
-| `yellow` | `#f9e2af` | `#df8e1d` |
-| `green` | `#a6e3a1` | `#40a02b` |
-| `teal` | `#94e2d5` | `#179299` |
-| `sky` | `#89dceb` | `#04a5e5` |
-| `sapphire` | `#74c7ec` | `#209fb5` |
-| `blue` | `#89b4fa` | `#1e66f5` |
-| `lavender` | `#b4befe` | `#7287fd` |
+| ID | Mocha | Macchiato | Frappe | Latte |
+|----|-------|-----------|--------|-------|
+| `rosewater` | `#f5e0dc` | `#f4dbd6` | `#f2d5cf` | `#dc8a78` |
+| `flamingo` | `#f2cdcd` | `#f0c6c6` | `#eebebe` | `#dd7878` |
+| `pink` | `#f5c2e7` | `#f5bde6` | `#f4b8e4` | `#ea76cb` |
+| `mauve` | `#cba6f7` | `#c6a0f6` | `#ca9ee6` | `#8839ef` |
+| `red` | `#f38ba8` | `#ed8796` | `#e78284` | `#d20f39` |
+| `maroon` | `#eba0ac` | `#ee99a0` | `#ea999c` | `#e64553` |
+| `peach` | `#fab387` | `#f5a97f` | `#ef9f76` | `#fe640b` |
+| `yellow` | `#f9e2af` | `#eed49f` | `#e5c890` | `#df8e1d` |
+| `green` | `#a6e3a1` | `#a6da95` | `#a6d189` | `#40a02b` |
+| `teal` | `#94e2d5` | `#8bd5ca` | `#81c8be` | `#179299` |
+| `sky` | `#89dceb` | `#91d7e3` | `#99d1db` | `#04a5e5` |
+| `sapphire` | `#74c7ec` | `#7dc4e4` | `#85c1dc` | `#209fb5` |
+| `blue` | `#89b4fa` | `#8aadf4` | `#8caaee` | `#1e66f5` |
+| `lavender` | `#b4befe` | `#b7bdf8` | `#babbf1` | `#7287fd` |
 
 Accent colors only change the `accent` value in the theme. All other colors
 (background, surface, text, etc.) remain the same.
 
-Custom themes defined in `theme.toml` do not use the accent system. Set the
-`accent` key in your TOML file directly to the color you want.
+Custom themes can also define their own accent variants using the `[accents]`
+section in `theme.toml`. See [Accent Variants](#accent-variants) above.
 
 ## Full CSS Override
 

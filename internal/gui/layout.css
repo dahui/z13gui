@@ -106,3 +106,8 @@
     border-width: 2px;
     border-style: solid;
 }
+
+/* Scrolled container inside theme picker popover */
+popover.z13-popover scrolledwindow {
+    background: transparent;
+}

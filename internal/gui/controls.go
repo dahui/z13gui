@@ -153,6 +153,7 @@ func (w *Window) buildThemePopover() *gtk.Popover {
 				dot.StyleContext().AddProvider(provider, gtk.STYLE_PROVIDER_PRIORITY_USER+20) //nolint:staticcheck // per-widget dynamic color; no style-class alternative for unique hex backgrounds
 				dot.SetTooltipText(ac.Name)
 				dot.ConnectClicked(func() {
+					btn.SetActive(true)
 					w.applyTheme(id, ac.ID)
 				})
 				row.Append(dot)
@@ -161,7 +162,65 @@ func (w *Window) buildThemePopover() *gtk.Popover {
 		}
 	}
 
-	pop.SetChild(box)
+	// Custom theme entry — shown when theme.toml is active.
+	if w.isCustomTheme {
+		customBtn := gtk.NewCheckButtonWithLabel("Custom")
+		if first != nil {
+			customBtn.SetGroup(first)
+		}
+		customBtn.SetActive(true)
+		// Clicking re-applies the base custom colors (resets accent to default).
+		customBtn.ConnectToggled(func() {
+			if customBtn.Active() {
+				w.applyCustomAccent("")
+			}
+		})
+		box.Append(customBtn)
+
+		if len(w.customAccents) > 0 {
+			accentLabel := gtk.NewLabel("Accent Color")
+			accentLabel.SetXAlign(0)
+			accentLabel.AddCSSClass("accent-label")
+			accentLabel.SetMarginStart(12)
+			accentLabel.SetMarginTop(2)
+			box.Append(accentLabel)
+
+			dotsGrid := gtk.NewBox(gtk.OrientationVertical, 3)
+			dotsGrid.SetMarginStart(12)
+			dotsGrid.SetMarginBottom(4)
+
+			const dotsPerRow = 7
+			var row *gtk.Box
+			for i, ac := range w.customAccents {
+				ac := ac
+				if i%dotsPerRow == 0 {
+					row = gtk.NewBox(gtk.OrientationHorizontal, 3)
+					dotsGrid.Append(row)
+				}
+				dot := gtk.NewButton()
+				dot.AddCSSClass("accent-dot")
+				if ac.ID == activeCfg.Accent {
+					dot.AddCSSClass("accent-dot-active")
+				}
+				provider := gtk.NewCSSProvider()
+				provider.LoadFromString("button.accent-dot { background: " + ac.Hex + "; }")
+				dot.StyleContext().AddProvider(provider, gtk.STYLE_PROVIDER_PRIORITY_USER+20) //nolint:staticcheck // per-widget dynamic color; no style-class alternative for unique hex backgrounds
+				dot.SetTooltipText(ac.Name)
+				dot.ConnectClicked(func() {
+					w.applyCustomAccent(ac.ID)
+				})
+				row.Append(dot)
+			}
+			box.Append(dotsGrid)
+		}
+	}
+
+	scroll := gtk.NewScrolledWindow()
+	scroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
+	scroll.SetMaxContentHeight(500)
+	scroll.SetPropagateNaturalHeight(true)
+	scroll.SetChild(box)
+	pop.SetChild(scroll)
 	return pop
 }
 

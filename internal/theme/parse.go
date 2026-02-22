@@ -2,17 +2,37 @@ package theme
 
 import "strings"
 
-// ParseThemeTOML reads a theme.toml file. Lines of the form key = "value" or
-// key = value are parsed. Comment lines (#) and blank lines are ignored.
-// Unknown keys are silently ignored. Invalid hex values fall back to the
-// corresponding default. Missing keys keep their default value.
+// ParseThemeTOML reads a theme.toml file and returns its color definitions.
+// Lines of the form key = "value" or key = value are parsed. Comment lines (#)
+// and blank lines are ignored. Unknown keys are silently ignored. Invalid hex
+// values fall back to the corresponding default. Missing keys keep their default
+// value. Any [accents] section is ignored; use ParseThemeTOMLFull to get accents.
 func ParseThemeTOML(data []byte) Colors {
+	c, _ := ParseThemeTOMLFull(data)
+	return c
+}
+
+// ParseThemeTOMLFull reads a theme.toml file and returns both its color
+// definitions and any accent color variants defined in an [accents] section.
+// The [accents] section is optional. Each line in it should be of the form
+// id = "#hex". The returned accent slice preserves file order.
+func ParseThemeTOMLFull(data []byte) (Colors, []Accent) {
 	c := DefaultColors
+	var accents []Accent
+	inAccents := false
+
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+
+		// Detect section headers.
+		if strings.HasPrefix(line, "[") {
+			inAccents = strings.TrimSpace(line) == "[accents]"
+			continue
+		}
+
 		// Strip inline comments.
 		if i := strings.Index(line, " #"); i >= 0 {
 			line = strings.TrimSpace(line[:i])
@@ -26,6 +46,16 @@ func ParseThemeTOML(data []byte) Colors {
 		if !IsHexColor(v) {
 			continue
 		}
+
+		if inAccents {
+			accents = append(accents, Accent{
+				ID:   k,
+				Name: titleCase(k),
+				Hex:  v,
+			})
+			continue
+		}
+
 		switch k {
 		case "accent":
 			c.Accent = v
@@ -43,7 +73,19 @@ func ParseThemeTOML(data []byte) Colors {
 			c.Border = v
 		}
 	}
-	return c
+	return c, accents
+}
+
+// titleCase uppercases the first byte of s. Only correct for ASCII strings,
+// which is fine for accent IDs like "blue" or "sapphire".
+func titleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	if s[0] >= 'a' && s[0] <= 'z' {
+		return string(s[0]-32) + s[1:]
+	}
+	return s
 }
 
 // IsHexColor returns true for valid CSS hex color strings: #rgb, #rrggbb, #rrggbbaa.

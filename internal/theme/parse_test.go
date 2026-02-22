@@ -164,3 +164,154 @@ func TestParseThemeTOML_NoEquals(t *testing.T) {
 		t.Error("invalid lines should be ignored, returning DefaultColors")
 	}
 }
+
+func TestParseThemeTOMLFull_NoAccents(t *testing.T) {
+	data := []byte(`accent = "#ff0000"`)
+	c, accents := ParseThemeTOMLFull(data)
+	if c.Accent != "#ff0000" {
+		t.Errorf("Accent = %q, want #ff0000", c.Accent)
+	}
+	if len(accents) != 0 {
+		t.Errorf("got %d accents, want 0", len(accents))
+	}
+}
+
+func TestParseThemeTOMLFull_WithAccents(t *testing.T) {
+	data := []byte(`
+accent = "#5294e2"
+background = "#1b2838"
+
+[accents]
+blue = "#5294e2"
+teal = "#2eb398"
+purple = "#9b59b6"
+`)
+	c, accents := ParseThemeTOMLFull(data)
+	if c.Accent != "#5294e2" {
+		t.Errorf("Accent = %q, want #5294e2", c.Accent)
+	}
+	if c.Background != "#1b2838" {
+		t.Errorf("Background = %q, want #1b2838", c.Background)
+	}
+	if len(accents) != 3 {
+		t.Fatalf("got %d accents, want 3", len(accents))
+	}
+	want := []Accent{
+		{ID: "blue", Name: "Blue", Hex: "#5294e2"},
+		{ID: "teal", Name: "Teal", Hex: "#2eb398"},
+		{ID: "purple", Name: "Purple", Hex: "#9b59b6"},
+	}
+	for i, a := range accents {
+		if a != want[i] {
+			t.Errorf("accents[%d] = %+v, want %+v", i, a, want[i])
+		}
+	}
+}
+
+func TestParseThemeTOMLFull_AccentInvalidHex(t *testing.T) {
+	data := []byte(`
+[accents]
+good = "#aabbcc"
+bad = "not-a-color"
+also_good = "#112233"
+`)
+	_, accents := ParseThemeTOMLFull(data)
+	if len(accents) != 2 {
+		t.Fatalf("got %d accents, want 2 (bad hex should be skipped)", len(accents))
+	}
+	if accents[0].ID != "good" {
+		t.Errorf("accents[0].ID = %q, want good", accents[0].ID)
+	}
+	if accents[1].ID != "also_good" {
+		t.Errorf("accents[1].ID = %q, want also_good", accents[1].ID)
+	}
+}
+
+func TestParseThemeTOMLFull_AccentOrder(t *testing.T) {
+	data := []byte(`
+[accents]
+cherry = "#ff0000"
+apple = "#00ff00"
+banana = "#0000ff"
+`)
+	_, accents := ParseThemeTOMLFull(data)
+	if len(accents) != 3 {
+		t.Fatalf("got %d accents, want 3", len(accents))
+	}
+	ids := []string{accents[0].ID, accents[1].ID, accents[2].ID}
+	if ids[0] != "cherry" || ids[1] != "apple" || ids[2] != "banana" {
+		t.Errorf("accent IDs = %v, want [cherry apple banana] (file order)", ids)
+	}
+}
+
+func TestParseThemeTOMLFull_StopsAtNextSection(t *testing.T) {
+	data := []byte(`
+accent = "#ff0000"
+
+[accents]
+blue = "#0000ff"
+
+[other]
+something = "#00ff00"
+`)
+	c, accents := ParseThemeTOMLFull(data)
+	if c.Accent != "#ff0000" {
+		t.Errorf("Accent = %q, want #ff0000", c.Accent)
+	}
+	if len(accents) != 1 {
+		t.Fatalf("got %d accents, want 1 (should stop at [other])", len(accents))
+	}
+	if accents[0].ID != "blue" {
+		t.Errorf("accents[0].ID = %q, want blue", accents[0].ID)
+	}
+}
+
+func TestParseThemeTOMLFull_CommentsInAccents(t *testing.T) {
+	data := []byte(`
+[accents]
+# This is a comment
+blue = "#0000ff"
+# Another comment
+red = "#ff0000"
+`)
+	_, accents := ParseThemeTOMLFull(data)
+	if len(accents) != 2 {
+		t.Fatalf("got %d accents, want 2", len(accents))
+	}
+}
+
+func TestParseThemeTOMLFull_AccentTitleCase(t *testing.T) {
+	data := []byte(`
+[accents]
+deep_blue = "#0000ff"
+RED = "#ff0000"
+`)
+	_, accents := ParseThemeTOMLFull(data)
+	if len(accents) != 2 {
+		t.Fatalf("got %d accents, want 2", len(accents))
+	}
+	if accents[0].Name != "Deep_blue" {
+		t.Errorf("accents[0].Name = %q, want Deep_blue", accents[0].Name)
+	}
+	if accents[1].Name != "RED" {
+		t.Errorf("accents[1].Name = %q, want RED (already uppercase)", accents[1].Name)
+	}
+}
+
+func TestParseThemeTOML_BackwardCompatible(t *testing.T) {
+	// ParseThemeTOML should still work unchanged, ignoring [accents].
+	data := []byte(`
+accent = "#ff0000"
+background = "#111111"
+
+[accents]
+blue = "#0000ff"
+`)
+	c := ParseThemeTOML(data)
+	if c.Accent != "#ff0000" {
+		t.Errorf("Accent = %q, want #ff0000", c.Accent)
+	}
+	if c.Background != "#111111" {
+		t.Errorf("Background = %q, want #111111", c.Background)
+	}
+}
