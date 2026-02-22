@@ -1,0 +1,108 @@
+/* layout.css — structural rules only. No colors. Not user-overridable.
+   This file is embedded in the binary and always loaded at PRIORITY_APPLICATION.
+   All element-level rules are scoped to .drawer to avoid affecting child windows
+   (GtkColorDialog, etc.) that share the same GTK process. */
+
+/* Drawer outer container */
+.drawer {
+    padding: 0;
+}
+
+/* Touch targets — all interactive controls minimum 48px tall */
+.drawer checkbutton {
+    min-height: 48px;
+    padding: 4px 10px;
+    border-radius: 6px;
+}
+
+/* Mode grid buttons are slightly taller */
+.drawer .mode-grid checkbutton {
+    min-height: 52px;
+}
+
+/* Tab buttons stretch to fill available width */
+.tab-btn {
+    -gtk-icon-size: 0;  /* hide the checkbox indicator */
+    min-height: 48px;
+}
+
+
+/* Sliders — fat touch targets */
+.drawer scale slider {
+    min-width: 24px;
+    min-height: 24px;
+}
+
+/* Scale value label — push above the slider handle so it isn't obscured */
+.drawer scale value {
+    margin-bottom: 6px;
+}
+
+/* Drawer title — "z13ctl" fixed above scroll area */
+.drawer-title {
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 3px;
+}
+
+/* Section group headings — larger, used for "TDP AND POWER" / "RGB" */
+.section-group {
+    font-size: 13px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    margin-top: 2px;
+    margin-bottom: 0px;
+}
+
+/* Section labels — small caps */
+.section-label {
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    margin-top: 6px;
+    margin-bottom: 2px;
+}
+
+/* Current-color swatch — the non-interactive colored square. */
+.color-swatch {
+    border-radius: 4px;
+    min-width: 28px;
+    min-height: 28px;
+}
+
+/* Preset color buttons — compact square touch targets. */
+.color-preset {
+    padding: 0;
+    min-width: 28px;
+    min-height: 28px;
+    border-radius: 4px;
+}
+
+/* Bottom bar — palette and future gear button */
+.bottom-bar button {
+    min-width: 32px;
+    min-height: 32px;
+    padding: 4px;
+    border-radius: 6px;
+}
+
+/* Accent label in theme picker popover */
+.accent-label {
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+/* Accent color dot buttons in theme picker popover */
+.accent-dot {
+    padding: 0;
+    min-width: 14px;
+    min-height: 14px;
+    border-radius: 50%;
+    border: 1px solid transparent;
+}
+
+.accent-dot-active {
+    border-width: 2px;
+    border-style: solid;
+}

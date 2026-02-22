@@ -1,0 +1,32 @@
+# Catppuccin Latte — z13gui theme (light)
+# Copy this file to ~/.config/z13gui/theme.toml to use it.
+# All values are CSS hex color strings: #rrggbb
+# Changes take effect the next time z13gui starts.
+#
+# This theme supports accent color variants via the built-in theme picker.
+# The accent below is the default (Mauve). Other accents include:
+# Rosewater (#dc8a78), Flamingo (#dd7878), Pink (#ea76cb), Red (#d20f39),
+# Maroon (#e64553), Peach (#fe640b), Yellow (#df8e1d), Green (#40a02b),
+# Teal (#179299), Sky (#04a5e5), Sapphire (#209fb5), Blue (#1e66f5),
+# Lavender (#7287fd)
+
+# Accent color — active buttons, slider fill, checked states
+accent = "#8839ef"
+
+# Drawer background
+background = "#eff1f5"
+
+# Surface color — button and row backgrounds
+surface = "#e6e9ef"
+
+# Alternate surface — hover state background
+surface_alt = "#dce0e8"
+
+# Primary text color
+text = "#4c4f69"
+
+# Dim text color — section labels, secondary descriptions
+text_dim = "#7c7f93"
+
+# Border color — window outline and separators
+border = "#bcc0cc"

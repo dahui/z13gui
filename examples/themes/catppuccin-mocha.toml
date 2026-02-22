@@ -1,0 +1,32 @@
+# Catppuccin Mocha — z13gui theme
+# Copy this file to ~/.config/z13gui/theme.toml to use it.
+# All values are CSS hex color strings: #rrggbb
+# Changes take effect the next time z13gui starts.
+#
+# This theme supports accent color variants via the built-in theme picker.
+# The accent below is the default (Mauve). Other accents include:
+# Rosewater (#f5e0dc), Flamingo (#f2cdcd), Pink (#f5c2e7), Red (#f38ba8),
+# Maroon (#eba0ac), Peach (#fab387), Yellow (#f9e2af), Green (#a6e3a1),
+# Teal (#94e2d5), Sky (#89dceb), Sapphire (#74c7ec), Blue (#89b4fa),
+# Lavender (#b4befe)
+
+# Accent color — active buttons, slider fill, checked states
+accent = "#cba6f7"
+
+# Drawer background
+background = "#1e1e2e"
+
+# Surface color — button and row backgrounds
+surface = "#313244"
+
+# Alternate surface — hover state background
+surface_alt = "#45475a"
+
+# Primary text color
+text = "#cdd6f4"
+
+# Dim text color — section labels, secondary descriptions
+text_dim = "#a6adc8"
+
+# Border color — window outline and separators
+border = "#585b70"

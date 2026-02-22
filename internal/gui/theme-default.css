@@ -1,0 +1,177 @@
+/* z13gui default theme — ROG dark red.
+   To create a custom theme, copy this file to:
+       $XDG_CONFIG_HOME/z13gui/theme.css   (usually ~/.config/z13gui/theme.css)
+   and modify the @define-color values or any rule below.
+
+   Available named colors:
+     @z13-accent      — active/highlight color (buttons, sliders, selections)
+     @z13-bg          — drawer background
+     @z13-surface     — raised surface color (buttons, rows)
+     @z13-surface-alt — alternate/hover surface
+     @z13-text        — primary text
+     @z13-text-dim    — secondary/label text
+     @z13-border      — window border and separator color
+     @z13-radius      — window corner radius (requires GTK 4.12+)
+
+   All element-level rules are scoped to .drawer (or window.z13-drawer-window).
+
+   This file is loaded at STYLE_PROVIDER_PRIORITY_USER so its rules take
+   precedence over the GTK default theme. */
+
+@define-color z13-accent      #cc0000;
+@define-color z13-bg          #1a1a1a;
+@define-color z13-surface     #2a2a2a;
+@define-color z13-surface-alt #333333;
+@define-color z13-text        #e0e0e0;
+@define-color z13-text-dim    #888888;
+@define-color z13-border      #444444;
+
+/* Window — transparent background so border-radius from .drawer is visible. */
+window.z13-drawer-window {
+    background: transparent;
+}
+
+/* Main drawer box */
+.drawer {
+    background: @z13-bg;
+    color: @z13-text;
+    border-radius: 12px;
+    border: 1px solid @z13-border;
+    /* No box-shadow: shadow pixels outside clip region cause smearing in Wayland Vulkan */
+}
+
+/* Drawer title */
+.drawer-title {
+    color: @z13-text-dim;
+}
+
+/* Section group headings */
+.section-group {
+    color: @z13-text;
+}
+
+/* Section labels */
+.section-label {
+    color: @z13-text-dim;
+}
+
+/* Separators */
+.drawer separator {
+    background: @z13-border;
+    min-height: 1px;
+}
+
+/* Tab and mode/speed radio buttons */
+.drawer checkbutton {
+    background: @z13-surface;
+    color: @z13-text;
+}
+
+.drawer checkbutton:hover {
+    background: @z13-surface-alt;
+}
+
+.drawer checkbutton:checked {
+    background: @z13-accent;
+    color: #ffffff;
+}
+
+
+/* Sliders */
+.drawer scale trough {
+    background: @z13-surface;
+}
+
+.drawer scale trough highlight {
+    background: @z13-accent;
+}
+
+
+/* Current-color swatch */
+.drawer .color-swatch {
+    border: 1px solid @z13-border;
+}
+
+/* Preset color buttons */
+.drawer .color-preset {
+    border: 1px solid @z13-border;
+}
+
+.drawer .color-preset:hover {
+    border: 1px solid @z13-text;
+}
+
+/* Bottom bar — palette menu button */
+.bottom-bar menubutton > button {
+    background: @z13-surface;
+    color: @z13-text;
+    border: 1px solid @z13-border;
+}
+
+.bottom-bar menubutton > button:hover {
+    background: @z13-surface-alt;
+}
+
+/* Popovers (theme picker, color chooser) — not inside .drawer */
+popover.z13-popover > contents {
+    background: @z13-surface;
+    color: @z13-text;
+    border: 1px solid @z13-border;
+    border-radius: 8px;
+}
+
+/* Checkbuttons inside popovers (theme radio list) */
+popover.z13-popover checkbutton {
+    color: @z13-text;
+    background: @z13-bg;
+}
+
+popover.z13-popover checkbutton:hover {
+    background: @z13-surface-alt;
+}
+
+popover.z13-popover checkbutton:checked {
+    background: @z13-accent;
+    color: #ffffff;
+}
+
+popover.z13-popover checkbutton indicator {
+    background: @z13-bg;
+    border: 1px solid @z13-border;
+    border-radius: 50%;
+}
+
+popover.z13-popover checkbutton:checked indicator {
+    background: @z13-accent;
+    border-color: @z13-accent;
+}
+
+/* Labels inside popovers */
+popover.z13-popover .section-label {
+    color: @z13-text-dim;
+}
+
+popover.z13-popover .accent-label {
+    color: @z13-text-dim;
+}
+
+/* Active accent dot — theme-aware border (visible on both dark and light) */
+.accent-dot-active {
+    border-color: @z13-text;
+}
+
+/* DropDown (profile selector) */
+.drawer dropdown > button {
+    background: @z13-surface;
+    color: @z13-text;
+    border: 1px solid @z13-border;
+}
+
+.drawer dropdown > button:hover {
+    background: @z13-surface-alt;
+}
+
+/* Slider value label */
+.drawer scale value {
+    color: @z13-text;
+}
