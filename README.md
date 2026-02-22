@@ -9,6 +9,7 @@ GTK4 overlay drawer for [z13ctl](https://github.com/dahui/z13ctl) on Wayland.
 - [Background](#background)
 - [Requirements](#requirements)
 - [Installation](#installation)
+- [Running as a Service](#running-as-a-service)
 - [Usage](#usage)
 - [Themes](#themes)
 - [Command-line Flags](#command-line-flags)
@@ -58,6 +59,46 @@ make build
 sudo install -Dm755 z13gui /usr/local/bin/z13gui
 ```
 
+## Running as a Service
+
+z13gui is designed to run in the background, waiting for the Armoury Crate
+button press. A systemd user service is the recommended way to start it
+automatically on login.
+
+**From source:**
+
+```sh
+make install
+make install-service
+systemctl --user enable --now z13gui
+```
+
+**From binary release:**
+
+```sh
+sudo install -Dm755 z13gui /usr/local/bin/z13gui
+install -Dm644 dist/z13gui.service ~/.config/systemd/user/z13gui.service
+systemctl --user daemon-reload
+systemctl --user enable --now z13gui
+```
+
+To install the desktop entry (optional):
+
+```sh
+# From source:
+make install-desktop
+
+# From binary release:
+install -Dm644 dist/z13gui.desktop ~/.local/share/applications/z13gui.desktop
+```
+
+Check service status:
+
+```sh
+systemctl --user status z13gui
+journalctl --user -u z13gui -f
+```
+
 ## Usage
 
 Press the Armoury Crate button on your Z13 to open the drawer. Press it again
@@ -90,7 +131,7 @@ values. See [THEMING.md](THEMING.md) for the full theming guide.
 
 | Flag | Description |
 |------|-------------|
-| `--verbose`, `-v` | Enable debug logging |
+| `--verbose`, `-v` | Enable debug logging (includes GTK messages) |
 | `--version` | Print version and exit |
 | `--print-theme` | Print the default theme.toml to stdout |
 | `--list-themes` | List all built-in themes and exit |

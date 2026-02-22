@@ -177,6 +177,7 @@ func (w *Window) sendApply() {
 		brightness = 0
 	}
 
+	slog.Debug("apply", "device", w.tab, "mode", mode, "brightness", brightness)
 	if _, err := api.SendApply(w.tab, color1, color2, mode, speed, brightness); err != nil {
 		slog.Warn("apply failed", "err", err)
 	}

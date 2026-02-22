@@ -5,6 +5,7 @@ package gui
 
 import (
 	_ "embed"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -150,21 +151,28 @@ func New(app *gtk.Application) *Window {
 
 	go w.subscribeLoop()
 
+	slog.Info("drawer initialized")
 	return w
 }
 
 // Toggle shows or hides the drawer. Must be called from the GTK main thread.
 func (w *Window) Toggle() {
 	if w.visible {
+		slog.Info("toggle", "action", "hide")
 		w.hide()
 	} else {
+		slog.Info("toggle", "action", "show")
 		w.show()
 		go func() {
-			if ok, state, err := api.SendGetState(); ok && err == nil {
+			ok, state, err := api.SendGetState()
+			if ok && err == nil {
+				slog.Debug("state fetched", "profile", state.Profile, "battery", state.Battery)
 				glib.IdleAdd(func() {
 					w.state = state
 					w.syncState()
 				})
+			} else if err != nil {
+				slog.Warn("get state failed", "err", err)
 			}
 		}()
 	}
@@ -231,12 +239,14 @@ func (w *Window) subscribeLoop() {
 	for {
 		ch, cancel, err := api.Subscribe([]string{"gui-toggle"})
 		if err != nil || ch == nil {
+			slog.Info("daemon disconnected, retrying", "backoff", backoff)
 			time.Sleep(backoff)
 			if backoff < 30*time.Second {
 				backoff *= 2
 			}
 			continue
 		}
+		slog.Info("daemon connected")
 		backoff = time.Second
 		for event := range ch {
 			if event == "gui-toggle" {
@@ -288,9 +298,11 @@ func (w *Window) loadCSS() {
 			}
 		}
 		w.themeProvider.LoadFromString(theme.BuildThemeCSS(colors, defaultThemeCSS))
+		slog.Info("theme loaded", "source", "custom-toml", "path", tomlPath)
 	case fileExists(cssPath):
 		data, _ := os.ReadFile(cssPath)
 		w.themeProvider.LoadFromString(string(data))
+		slog.Info("theme loaded", "source", "custom-css", "path", cssPath)
 	default:
 		cfg := theme.LoadAppConfig()
 		colors, ok := theme.BuiltinByID(cfg.Theme)
@@ -303,6 +315,7 @@ func (w *Window) loadCSS() {
 			}
 		}
 		w.themeProvider.LoadFromString(theme.BuildThemeCSS(colors, defaultThemeCSS))
+		slog.Info("theme loaded", "source", "builtin", "theme", cfg.Theme, "accent", cfg.Accent)
 	}
 
 	gtk.StyleContextAddProviderForDisplay(display, w.themeProvider, gtk.STYLE_PROVIDER_PRIORITY_USER)
@@ -330,6 +343,7 @@ func (w *Window) applyTheme(id, accentID string) {
 	w.themeProvider.LoadFromString(theme.BuildThemeCSS(colors, defaultThemeCSS))
 	gtk.StyleContextAddProviderForDisplay(display, w.themeProvider, gtk.STYLE_PROVIDER_PRIORITY_USER)
 	theme.SaveAppConfig(theme.AppConfig{Theme: id, Accent: accentID})
+	slog.Info("theme changed", "id", id, "accent", accentID)
 }
 
 // applyCustomAccent hot-swaps the accent color for a custom theme.toml theme.

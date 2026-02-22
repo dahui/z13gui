@@ -42,17 +42,19 @@ func main() {
 		}
 	}
 
-	// Configure slog level. gotk4's glib init() installs a GLib log writer that
-	// calls slog.Default() on every GLib/GTK message, mapping GTK-WARNING →
-	// slog.LevelWarn. Setting LevelError here suppresses all GTK-WARNING noise
-	// without any additional plumbing.
-	level := slog.LevelError
+	// Configure slog with split-level filtering. gotk4's glib init() routes
+	// all GLib/GTK messages through slog.Default(), adding a "glib_domain"
+	// attribute. Our filterHandler uses that to apply separate thresholds:
+	//   default: app=Info, GTK=Error (show app events, suppress GTK noise)
+	//   -v:      app=Debug, GTK=Debug (show everything)
+	appLevel, gtkLevel := slog.LevelInfo, slog.LevelError
 	if verbose {
-		level = slog.LevelDebug
+		appLevel, gtkLevel = slog.LevelDebug, slog.LevelDebug
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: level,
-	})))
+	text := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: appLevel})
+	slog.SetDefault(slog.New(gui.NewFilterHandler(text, appLevel, gtkLevel)))
+
+	slog.Info("starting", "version", Version)
 
 	app := gtk.NewApplication("com.github.dahui.z13gui", 0)
 	app.ConnectActivate(func() {
