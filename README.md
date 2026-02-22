@@ -131,7 +131,7 @@ values. See [THEMING.md](THEMING.md) for the full theming guide.
 
 | Flag | Description |
 |------|-------------|
-| `--verbose`, `-v` | Enable debug logging (includes GTK messages) |
+| `--debug`, `-d` | Enable debug logging (includes GTK messages) |
 | `--version` | Print version and exit |
 | `--print-theme` | Print the default theme.toml to stdout |
 | `--list-themes` | List all built-in themes and exit |

@@ -20,12 +20,12 @@ func main() {
 	// Scan args for our flags before GTK sees them. We cannot use flag.Parse()
 	// because app.Run() passes remaining args to GLib's option parser, which
 	// would error on any flags it doesn't recognize.
-	verbose := false
+	debug := false
 	gtkArgs := []string{os.Args[0]}
 	for _, arg := range os.Args[1:] {
 		switch arg {
-		case "--verbose", "-v":
-			verbose = true
+		case "--debug", "-d":
+			debug = true
 		case "--version":
 			fmt.Printf("z13gui %s\n", Version)
 			os.Exit(0)
@@ -46,9 +46,9 @@ func main() {
 	// all GLib/GTK messages through slog.Default(), adding a "glib_domain"
 	// attribute. Our filterHandler uses that to apply separate thresholds:
 	//   default: app=Info, GTK=Error (show app events, suppress GTK noise)
-	//   -v:      app=Debug, GTK=Debug (show everything)
+	//   -d:      app=Debug, GTK=Debug (show everything including GTK internals)
 	appLevel, gtkLevel := slog.LevelInfo, slog.LevelError
-	if verbose {
+	if debug {
 		appLevel, gtkLevel = slog.LevelDebug, slog.LevelDebug
 	}
 	text := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: appLevel})
