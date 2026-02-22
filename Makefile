@@ -1,7 +1,7 @@
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS  := -s -w -X main.Version=$(VERSION)
 
-.PHONY: build install install-service install-desktop lint clean
+.PHONY: build install install-service install-desktop lint clean snapshot release
 
 ## build: compile z13gui (CGO required for GTK4)
 build:
@@ -13,12 +13,20 @@ install: build
 
 ## install-service: install systemd user service (enable with: systemctl --user enable --now z13gui)
 install-service:
-	install -Dm644 dist/z13gui.service $(HOME)/.config/systemd/user/z13gui.service
+	install -Dm644 contrib/z13gui.service $(HOME)/.config/systemd/user/z13gui.service
 	systemctl --user daemon-reload
 
 ## install-desktop: install desktop entry
 install-desktop:
-	install -Dm644 dist/z13gui.desktop $(HOME)/.local/share/applications/z13gui.desktop
+	install -Dm644 contrib/z13gui.desktop $(HOME)/.local/share/applications/z13gui.desktop
+
+## snapshot: build release locally (no publish)
+snapshot:
+	goreleaser release --snapshot --clean
+
+## release: build and publish release
+release:
+	goreleaser release --clean
 
 ## lint: run golangci-lint
 lint:

@@ -77,7 +77,7 @@ systemctl --user enable --now z13gui
 
 ```sh
 sudo install -Dm755 z13gui /usr/local/bin/z13gui
-install -Dm644 dist/z13gui.service ~/.config/systemd/user/z13gui.service
+install -Dm644 contrib/z13gui.service ~/.config/systemd/user/z13gui.service
 systemctl --user daemon-reload
 systemctl --user enable --now z13gui
 ```
@@ -89,7 +89,7 @@ To install the desktop entry (optional):
 make install-desktop
 
 # From binary release:
-install -Dm644 dist/z13gui.desktop ~/.local/share/applications/z13gui.desktop
+install -Dm644 contrib/z13gui.desktop ~/.local/share/applications/z13gui.desktop
 ```
 
 Check service status:

@@ -1,0 +1,14 @@
+[Unit]
+Description=z13gui - GTK4 overlay drawer for z13ctl
+Documentation=https://github.com/dahui/z13gui
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/z13gui
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

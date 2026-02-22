@@ -1,0 +1,34 @@
+version: 2
+
+project_name: z13gui
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: z13gui
+    binary: z13gui
+    env:
+      - CGO_ENABLED=1
+    ldflags:
+      - -s -w -X main.Version={{.Version}}
+    goos:
+      - linux
+    goarch:
+      - amd64
+
+archives:
+  - id: z13gui
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - contrib/*
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  draft: false
+  prerelease: auto
