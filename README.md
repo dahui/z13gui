@@ -68,9 +68,9 @@ automatically on login.
 **From source:**
 
 ```sh
-make install
+make build
+sudo make install
 make install-service
-systemctl --user enable --now z13gui
 ```
 
 **From binary release:**

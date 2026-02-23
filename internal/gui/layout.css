@@ -123,3 +123,11 @@
 popover.z13-popover scrolledwindow {
     background: transparent;
 }
+
+/* Gamescope overlay — fullscreen transparent wrapper with scrim backdrop */
+.gs-wrapper {
+    background: transparent;
+}
+.gs-backdrop {
+    background: rgba(0, 0, 0, 0.3);
+}

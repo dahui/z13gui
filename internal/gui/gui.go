@@ -1,19 +1,20 @@
-// Package gui implements the GTK4 layer-shell overlay drawer for z13gui.
-// It provides the main Window type that handles show/hide animation,
-// daemon state synchronization, and all GTK widget construction.
+// Package gui implements the GTK4 overlay drawer for z13gui.
+// It provides the main Window type that handles daemon state synchronization,
+// GTK widget construction, and theming. Display-mode-specific concerns
+// (layer-shell vs gamescope X11 overlay) are delegated to Backend implementations.
 package gui
 
 import (
 	_ "embed"
 	"log/slog"
-	"math"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/dahui/z13ctl/api"
+	"github.com/dahui/z13gui/internal/gui/gamescope"
+	"github.com/dahui/z13gui/internal/gui/layershell"
 	"github.com/dahui/z13gui/internal/theme"
-	"github.com/diamondburned/gotk4-layer-shell/pkg/gtk4layershell"
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
 	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
@@ -28,19 +29,14 @@ var defaultThemeCSS string
 //go:embed theme-default.toml
 var defaultThemeTOML string
 
-const (
-	drawerWidth  = 320                   // drawer panel width in pixels
-	hiddenMargin = -(drawerWidth + 80)   // off-screen margin (extra buffer for wider surfaces)
-	animDuration = 200 * time.Millisecond // slide animation duration
-)
+const drawerWidth = 320 // drawer panel width in pixels
 
 // Window is the overlay drawer. All methods must be called from the GTK main
 // thread except subscribeLoop, which runs in a background goroutine.
 type Window struct {
 	win     *gtk.ApplicationWindow
-	gtkWin  *gtk.Window // alias for layer-shell calls
-	margin  int         // current right margin: 0=on-screen, hiddenMargin=off-screen
-	animGen uint64      // incremented to cancel in-flight animations
+	gtkWin  *gtk.Window // alias for backend calls
+	backend Backend     // display backend (layer-shell or gamescope)
 	state   *api.State  // latest daemon state; nil until first successful fetch
 	tab     string      // active device tab: "keyboard" or "lightbar"
 	visible bool        // true when the drawer is on-screen or animating in
@@ -80,25 +76,20 @@ func New(app *gtk.Application) *Window {
 		tab:         "keyboard",
 		modeButtons: make(map[string]*gtk.CheckButton),
 		speedBtns:   make(map[string]*gtk.CheckButton),
-		margin:      hiddenMargin,
 	}
 
 	w.win = gtk.NewApplicationWindow(app)
-	w.win.SetDecorated(false)
 	w.win.AddCSSClass("z13-drawer-window")
-
-	// Layer shell setup — must happen before the window is realized.
 	w.gtkWin = &w.win.Window
-	gtk4layershell.InitForWindow(w.gtkWin)
-	gtk4layershell.SetLayer(w.gtkWin, gtk4layershell.LayerShellLayerOverlay)
-	gtk4layershell.SetAnchor(w.gtkWin, gtk4layershell.LayerShellEdgeRight, true)
-	gtk4layershell.SetAnchor(w.gtkWin, gtk4layershell.LayerShellEdgeTop, true)
-	gtk4layershell.SetAnchor(w.gtkWin, gtk4layershell.LayerShellEdgeBottom, true)
-	gtk4layershell.SetKeyboardMode(w.gtkWin, gtk4layershell.LayerShellKeyboardModeNone)
-	// Start off-screen to the right; animation moves margin toward 0 to reveal.
-	gtk4layershell.SetMargin(w.gtkWin, gtk4layershell.LayerShellEdgeRight, hiddenMargin)
 
-	w.win.SetSizeRequest(drawerWidth, -1)
+	// Select display backend.
+	if os.Getenv("GAMESCOPE_WAYLAND_DISPLAY") != "" {
+		w.backend = gamescope.New(w.win, w.gtkWin, drawerWidth)
+	} else {
+		w.backend = layershell.New(w.win, w.gtkWin, drawerWidth)
+	}
+
+	w.backend.Configure(func() bool { return w.visible }, w.hide)
 
 	// Load CSS (layout + theme).
 	w.loadCSS()
@@ -107,49 +98,10 @@ func New(app *gtk.Application) *Window {
 	w.swatchProvider = gtk.NewCSSProvider()
 	gtk.StyleContextAddProviderForDisplay(gdk.DisplayGetDefault(), w.swatchProvider, gtk.STYLE_PROVIDER_PRIORITY_USER+10)
 
-	// Set content directly — no Revealer (causes smearing artifacts in Wayland Vulkan).
+	// Build content and let the backend wrap it if needed.
 	w.syncing = true
-	w.win.SetChild(w.buildContent())
+	w.win.SetChild(w.backend.WrapContent(w.buildContent()))
 	w.syncing = false
-
-	// Hide when the window loses focus, but delay to allow child dialogs
-	// (e.g. color picker) to become the active window first.
-	w.win.Connect("notify::is-active", func() {
-		if w.win.IsActive() || !w.visible {
-			return
-		}
-		glib.TimeoutAdd(50, func() bool {
-			if !w.visible || w.win.IsActive() {
-				return false
-			}
-			active := w.win.Application().ActiveWindow()
-			if active != nil && active.Object.Native() != w.gtkWin.Object.Native() {
-				return false
-			}
-			w.hide()
-			return false
-		})
-	})
-
-	// Set top/bottom margins to 5% of screen height once the surface is realized.
-	w.win.Connect("realize", func() {
-		surface := w.win.Surface()
-		if surface == nil {
-			return
-		}
-		monitor := gdk.DisplayGetDefault().MonitorAtSurface(surface)
-		if monitor == nil {
-			return
-		}
-		geo := monitor.Geometry()
-		margin := geo.Height() / 20
-		gtk4layershell.SetMargin(w.gtkWin, gtk4layershell.LayerShellEdgeTop, margin)
-		gtk4layershell.SetMargin(w.gtkWin, gtk4layershell.LayerShellEdgeBottom, margin)
-	})
-
-	// Keep the window surface alive at all times; "hidden" = margin off-screen.
-	// This prevents KDE Plasma ghost-surface artifact on remap.
-	w.win.SetVisible(true)
 
 	go w.subscribeLoop()
 
@@ -180,57 +132,16 @@ func (w *Window) Toggle() {
 	}
 }
 
-// show starts the slide-in animation using a smoothstep easing curve.
+// show delegates to the display backend.
 func (w *Window) show() {
-	gtk4layershell.SetKeyboardMode(w.gtkWin, gtk4layershell.LayerShellKeyboardModeOnDemand)
 	w.visible = true
-	w.animGen++
-	gen := w.animGen
-	startMargin := w.margin
-	startTime := time.Now()
-
-	glib.TimeoutAdd(16, func() bool {
-		if w.animGen != gen {
-			return false
-		}
-		t := float64(time.Since(startTime)) / float64(animDuration)
-		if t >= 1.0 {
-			w.margin = 0
-			gtk4layershell.SetMargin(w.gtkWin, gtk4layershell.LayerShellEdgeRight, 0)
-			return false
-		}
-		t = t * t * (3 - 2*t) // smoothstep
-		w.margin = startMargin + int(math.Round(float64(-startMargin)*t))
-		gtk4layershell.SetMargin(w.gtkWin, gtk4layershell.LayerShellEdgeRight, w.margin)
-		return true
-	})
-	w.win.Present()
+	w.backend.Show()
 }
 
-// hide starts the slide-out animation.
+// hide delegates to the display backend.
 func (w *Window) hide() {
-	gtk4layershell.SetKeyboardMode(w.gtkWin, gtk4layershell.LayerShellKeyboardModeNone)
 	w.visible = false
-	w.animGen++
-	gen := w.animGen
-	startMargin := w.margin
-	startTime := time.Now()
-
-	glib.TimeoutAdd(16, func() bool {
-		if w.animGen != gen {
-			return false
-		}
-		t := float64(time.Since(startTime)) / float64(animDuration)
-		if t >= 1.0 {
-			w.margin = hiddenMargin
-			gtk4layershell.SetMargin(w.gtkWin, gtk4layershell.LayerShellEdgeRight, hiddenMargin)
-			return false
-		}
-		t = t * t * (3 - 2*t) // smoothstep
-		w.margin = startMargin + int(math.Round(float64(hiddenMargin-startMargin)*t))
-		gtk4layershell.SetMargin(w.gtkWin, gtk4layershell.LayerShellEdgeRight, w.margin)
-		return true
-	})
+	w.backend.Hide()
 }
 
 // subscribeLoop runs in a background goroutine. It subscribes to daemon events

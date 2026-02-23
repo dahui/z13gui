@@ -45,9 +45,9 @@ func main() {
 	// Configure slog with split-level filtering. gotk4's glib init() routes
 	// all GLib/GTK messages through slog.Default(), adding a "glib_domain"
 	// attribute. Our filterHandler uses that to apply separate thresholds:
-	//   default: app=Info, GTK=Error (show app events, suppress GTK noise)
+	//   default: app=Info, GTK=Warn (show app events, suppress GTK debug/info noise)
 	//   -d:      app=Debug, GTK=Debug (show everything including GTK internals)
-	appLevel, gtkLevel := slog.LevelInfo, slog.LevelError
+	appLevel, gtkLevel := slog.LevelInfo, slog.LevelWarn
 	if debug {
 		appLevel, gtkLevel = slog.LevelDebug, slog.LevelDebug
 	}
@@ -55,6 +55,14 @@ func main() {
 	slog.SetDefault(slog.New(gui.NewFilterHandler(text, appLevel, gtkLevel)))
 
 	slog.Info("starting", "version", Version)
+
+	// Gamescope advertises Wayland layer-shell but doesn't implement
+	// anchoring/margins. Force GTK4 to use X11 so we can set gamescope
+	// overlay atoms instead. Must be set before GDK initialization.
+	if os.Getenv("GAMESCOPE_WAYLAND_DISPLAY") != "" {
+		slog.Info("gamescope detected, forcing X11 backend")
+		_ = os.Setenv("GDK_BACKEND", "x11")
+	}
 
 	app := gtk.NewApplication("com.github.dahui.z13gui", 0)
 	app.ConnectActivate(func() {
