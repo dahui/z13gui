@@ -67,8 +67,9 @@ func (w *Window) buildContent() gtk.Widgetter {
 	return outer
 }
 
-// buildBottomBar returns the fixed bottom bar containing the theme picker button.
-// It sits below the scroll area and is always visible (not scrolled).
+// buildBottomBar returns the fixed bottom bar containing the theme picker button
+// and system toggles (panel overdrive, boot sound). It sits below the scroll
+// area and is always visible (not scrolled).
 func (w *Window) buildBottomBar() *gtk.Box {
 	bar := gtk.NewBox(gtk.OrientationHorizontal, 4)
 	bar.AddCSSClass("bottom-bar")
@@ -87,14 +88,14 @@ func (w *Window) buildBottomBar() *gtk.Box {
 	spacer.SetHExpand(true)
 	bar.Append(spacer)
 
-	bar.Append(w.buildToggle("Panel Overdrive", &w.overdriveSwitch, func(active bool) {
+	bar.Append(w.buildToggle("Panel Overdrive", "Enable panel overdrive for faster pixel response (may cause ghosting)", &w.overdriveSwitch, func(active bool) {
 		v := 0
 		if active {
 			v = 1
 		}
 		w.sendOverdriveSet(v)
 	}))
-	bar.Append(w.buildToggle("Boot Sound", &w.bootSoundSwitch, func(active bool) {
+	bar.Append(w.buildToggle("Boot Sound", "Play startup sound when the laptop powers on", &w.bootSoundSwitch, func(active bool) {
 		v := 0
 		if active {
 			v = 1
@@ -106,8 +107,9 @@ func (w *Window) buildBottomBar() *gtk.Box {
 }
 
 // buildToggle creates a compact label + switch pair for the bottom bar.
-func (w *Window) buildToggle(label string, sw **gtk.Switch, onChange func(bool)) *gtk.Box {
+func (w *Window) buildToggle(label, tooltip string, sw **gtk.Switch, onChange func(bool)) *gtk.Box {
 	box := gtk.NewBox(gtk.OrientationHorizontal, 4)
+	box.SetTooltipText(tooltip)
 	lbl := gtk.NewLabel(label)
 	lbl.AddCSSClass("toggle-label")
 	s := gtk.NewSwitch()

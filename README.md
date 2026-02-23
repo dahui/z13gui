@@ -115,6 +115,8 @@ The drawer provides controls for:
 - **Color** -- pick from 8 preset colors or open a custom color chooser
 - **Speed** -- animation speed for modes that support it (slow, normal, fast)
 - **Brightness** -- lighting brightness (0-3)
+- **Panel Overdrive** -- toggle panel overdrive for faster pixel response
+- **Boot Sound** -- enable or disable the startup sound
 
 Changes are sent to the z13ctl daemon immediately and persist across reboots.
 
