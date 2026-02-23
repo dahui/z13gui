@@ -41,9 +41,12 @@ func Register() {
 		{"Inter-Bold.ttf", interBold},
 	} {
 		path := filepath.Join(dir, f.name)
-		if err := os.WriteFile(path, f.data, 0o644); err != nil {
-			slog.Warn("fonts: write failed", "path", path, "err", err)
-			continue
+		// Skip write if file already exists with correct size.
+		if info, err := os.Stat(path); err != nil || info.Size() != int64(len(f.data)) {
+			if err := os.WriteFile(path, f.data, 0o644); err != nil {
+				slog.Warn("fonts: write failed", "path", path, "err", err)
+				continue
+			}
 		}
 		cpath := C.CString(path)
 		ok := C.FcConfigAppFontAddFile(C.FcConfigGetCurrent(), (*C.FcChar8)(unsafe.Pointer(cpath)))

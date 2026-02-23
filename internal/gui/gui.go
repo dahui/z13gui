@@ -186,7 +186,7 @@ func (w *Window) subscribeLoop() {
 		backoff = time.Second
 		for event := range ch {
 			if event == "gui-toggle" {
-				glib.IdleAdd(func() bool {
+				glib.TimeoutAdd(0, func() bool {
 					w.Toggle()
 					return false
 				})
