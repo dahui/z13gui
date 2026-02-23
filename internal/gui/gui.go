@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dahui/z13ctl/api"
+	"github.com/dahui/z13gui/internal/gui/fonts"
 	"github.com/dahui/z13gui/internal/gui/gamescope"
 	"github.com/dahui/z13gui/internal/gui/layershell"
 	"github.com/dahui/z13gui/internal/theme"
@@ -105,6 +106,9 @@ func New(app *gtk.Application) *Window {
 	}
 
 	w.backend.Configure(func() bool { return w.visible }, w.hide)
+
+	// Register embedded Inter font before loading CSS so font-family resolves.
+	fonts.Register()
 
 	// Load CSS (layout + theme).
 	w.loadCSS()

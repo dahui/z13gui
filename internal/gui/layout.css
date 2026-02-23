@@ -93,15 +93,7 @@
     letter-spacing: 1px;
 }
 
-/* Accent color dot buttons in theme picker popover */
-.accent-dot {
-    padding: 0;
-    min-width: 14px;
-    min-height: 14px;
-    border-radius: 50%;
-    border: 1px solid transparent;
-}
-
+/* Active accent swatch — thicker border on the selected accent color */
 .accent-dot-active {
     border-width: 2px;
     border-style: solid;

@@ -240,7 +240,7 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 			accentLabel.SetMarginTop(2)
 			box.Append(accentLabel)
 
-			dotsGrid := gtk.NewBox(gtk.OrientationVertical, 3)
+			dotsGrid := gtk.NewBox(gtk.OrientationVertical, 4)
 			dotsGrid.SetMarginStart(12)
 			dotsGrid.SetMarginBottom(4)
 
@@ -249,16 +249,17 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 			for i, ac := range t.Accents {
 				ac := ac
 				if i%dotsPerRow == 0 {
-					row = gtk.NewBox(gtk.OrientationHorizontal, 3)
+					row = gtk.NewBox(gtk.OrientationHorizontal, 4)
 					dotsGrid.Append(row)
 				}
 				dot := gtk.NewButton()
-				dot.AddCSSClass("accent-dot")
+				dot.AddCSSClass("color-preset")
+				dot.SetHExpand(true)
 				if id == activeCfg.Theme && ac.ID == activeCfg.Accent {
 					dot.AddCSSClass("accent-dot-active")
 				}
 				provider := gtk.NewCSSProvider()
-				provider.LoadFromString("button.accent-dot { background: " + ac.Hex + "; }")
+				provider.LoadFromString("button.color-preset { background: " + ac.Hex + "; }")
 				dot.StyleContext().AddProvider(provider, gtk.STYLE_PROVIDER_PRIORITY_USER+20) //nolint:staticcheck // per-widget dynamic color; no style-class alternative for unique hex backgrounds
 				dot.SetTooltipText(ac.Name)
 				dot.ConnectClicked(func() {
@@ -293,7 +294,7 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 			accentLabel.SetMarginTop(2)
 			box.Append(accentLabel)
 
-			dotsGrid := gtk.NewBox(gtk.OrientationVertical, 3)
+			dotsGrid := gtk.NewBox(gtk.OrientationVertical, 4)
 			dotsGrid.SetMarginStart(12)
 			dotsGrid.SetMarginBottom(4)
 
@@ -302,16 +303,17 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 			for i, ac := range w.customAccents {
 				ac := ac
 				if i%dotsPerRow == 0 {
-					row = gtk.NewBox(gtk.OrientationHorizontal, 3)
+					row = gtk.NewBox(gtk.OrientationHorizontal, 4)
 					dotsGrid.Append(row)
 				}
 				dot := gtk.NewButton()
-				dot.AddCSSClass("accent-dot")
+				dot.AddCSSClass("color-preset")
+				dot.SetHExpand(true)
 				if ac.ID == activeCfg.Accent {
 					dot.AddCSSClass("accent-dot-active")
 				}
 				provider := gtk.NewCSSProvider()
-				provider.LoadFromString("button.accent-dot { background: " + ac.Hex + "; }")
+				provider.LoadFromString("button.color-preset { background: " + ac.Hex + "; }")
 				dot.StyleContext().AddProvider(provider, gtk.STYLE_PROVIDER_PRIORITY_USER+20) //nolint:staticcheck // per-widget dynamic color; no style-class alternative for unique hex backgrounds
 				dot.SetTooltipText(ac.Name)
 				dot.ConnectClicked(func() {
