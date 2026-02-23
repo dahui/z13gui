@@ -54,6 +54,7 @@ type Window struct {
 	color1Box   *gtk.Box // COLOR 1 label + row — visibility toggled by syncModeVis
 	color2Box   *gtk.Box // COLOR 2 label + row — visibility toggled by syncModeVis
 	speedBox    *gtk.Box // SPEED label + row — visibility toggled by syncModeVis
+	brightBox   *gtk.Box // BRIGHTNESS label + scale — hidden when mode is "off"
 	speedBtns   map[string]*gtk.CheckButton
 	brightScale *gtk.Scale
 	profileBtns     map[string]*gtk.CheckButton

@@ -175,3 +175,12 @@ popover.z13-popover .accent-label {
 .drawer scale value {
     color: @z13-text;
 }
+
+/* Toggle switches (panel overdrive, boot sound) */
+.bottom-bar switch {
+    background: @z13-surface;
+}
+
+.bottom-bar switch:checked {
+    background: @z13-accent;
+}

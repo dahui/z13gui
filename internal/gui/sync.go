@@ -12,16 +12,16 @@ import (
 )
 
 // modeVis defines which subsections are visible for a given lighting mode.
-type modeVis struct{ color1, color2, speed bool }
+type modeVis struct{ color1, color2, speed, brightness bool }
 
 // modeVisMap maps lighting mode names to their subsection visibility.
 var modeVisMap = map[string]modeVis{
-	"static":  {true, false, false},
-	"breathe": {true, true, true},
-	"cycle":   {false, false, true},
-	"rainbow": {false, false, true},
-	"strobe":  {true, false, true},
-	"off":     {false, false, false},
+	"static":  {true, false, false, true},
+	"breathe": {true, true, true, true},
+	"cycle":   {false, false, true, true},
+	"rainbow": {false, false, true, true},
+	"strobe":  {true, false, true, true},
+	"off":     {false, false, false, false},
 }
 
 // syncModeVis shows/hides color and speed sections based on the active mode.
@@ -36,7 +36,7 @@ func (w *Window) syncModeVis() {
 	}
 	v, ok := modeVisMap[mode]
 	if !ok {
-		v = modeVis{true, true, true}
+		v = modeVis{true, true, true, true}
 	}
 	if w.color1Box != nil {
 		w.color1Box.SetVisible(v.color1)
@@ -46,6 +46,9 @@ func (w *Window) syncModeVis() {
 	}
 	if w.speedBox != nil {
 		w.speedBox.SetVisible(v.speed)
+	}
+	if w.brightBox != nil {
+		w.brightBox.SetVisible(v.brightness)
 	}
 }
 

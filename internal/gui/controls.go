@@ -57,7 +57,8 @@ func (w *Window) buildContent() gtk.Widgetter {
 
 	w.speedBox = w.buildSpeedBox()
 	inner.Append(w.speedBox)
-	inner.Append(w.buildBrightnessBox())
+	w.brightBox = w.buildBrightnessBox()
+	inner.Append(w.brightBox)
 
 	// Set initial visibility based on default mode (static).
 	w.syncModeVis()
@@ -578,7 +579,7 @@ func (w *Window) buildProfileSection() *gtk.Box {
 	box := gtk.NewBox(gtk.OrientationVertical, 4)
 	box.Append(sectionLabel("PROFILE"))
 
-	row := gtk.NewBox(gtk.OrientationHorizontal, 4)
+	row := gtk.NewBox(gtk.OrientationVertical, 4)
 	var first *gtk.CheckButton
 	for _, p := range profiles {
 		prof := p
@@ -588,7 +589,6 @@ func (w *Window) buildProfileSection() *gtk.Box {
 		} else {
 			btn.SetGroup(first)
 		}
-		btn.SetHExpand(true)
 		btn.ConnectToggled(func() {
 			if btn.Active() && !w.syncing {
 				w.sendProfileSet(prof)
