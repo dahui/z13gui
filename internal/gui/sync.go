@@ -98,16 +98,13 @@ func (w *Window) syncLightingSection() {
 	w.syncModeVis()
 }
 
-// syncProfile sets the profile dropdown to match the daemon state.
+// syncProfile sets the profile radio button to match the daemon state.
 func (w *Window) syncProfile() {
-	if w.state == nil || w.state.Profile == "" || w.profileDrop == nil {
+	if w.state == nil || w.state.Profile == "" {
 		return
 	}
-	for i, p := range profiles {
-		if p == w.state.Profile {
-			w.profileDrop.SetSelected(uint(i))
-			break
-		}
+	if btn, ok := w.profileBtns[w.state.Profile]; ok {
+		btn.SetActive(true)
 	}
 }
 

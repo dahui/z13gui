@@ -34,12 +34,13 @@ const drawerWidth = 320 // drawer panel width in pixels
 // Window is the overlay drawer. All methods must be called from the GTK main
 // thread except subscribeLoop, which runs in a background goroutine.
 type Window struct {
-	win     *gtk.ApplicationWindow
-	gtkWin  *gtk.Window // alias for backend calls
-	backend Backend     // display backend (layer-shell or gamescope)
-	state   *api.State  // latest daemon state; nil until first successful fetch
-	tab     string      // active device tab: "keyboard" or "lightbar"
-	visible bool        // true when the drawer is on-screen or animating in
+	win       *gtk.ApplicationWindow
+	gtkWin    *gtk.Window // alias for backend calls
+	backend   Backend     // display backend (layer-shell or gamescope)
+	gamescope bool        // true when running under gamescope (X11 overlay mode)
+	state     *api.State  // latest daemon state; nil until first successful fetch
+	tab       string      // active device tab: "keyboard" or "lightbar"
+	visible   bool        // true when the drawer is on-screen or animating in
 
 	swatchProvider *gtk.CSSProvider // dynamic swatch background colors
 	themeProvider  *gtk.CSSProvider // current theme; replaced on applyTheme()
@@ -55,13 +56,24 @@ type Window struct {
 	speedBox    *gtk.Box // SPEED label + row — visibility toggled by syncModeVis
 	speedBtns   map[string]*gtk.CheckButton
 	brightScale *gtk.Scale
-	profileDrop *gtk.DropDown
+	profileBtns     map[string]*gtk.CheckButton
 	battScale       *gtk.Scale
 	overdriveSwitch *gtk.Switch
 	bootSoundSwitch *gtk.Switch
 
 	syncing    bool        // true while syncState is updating widgets; suppresses sendApply
 	applyTimer *time.Timer // debounce for continuous inputs (brightness, color wheel)
+
+	// Gamescope view switching (nil in KDE mode).
+	viewStack       *gtk.Stack       // switches between main/theme/color views
+	editingColor    *colorInput      // which color the color-picker view is editing
+	colorViewTitle  *gtk.Label       // "COLOR 1" or "COLOR 2" in color view header
+	colorHue        *gtk.Scale       // H: 0-360
+	colorSat        *gtk.Scale       // S: 0-100
+	colorLit        *gtk.Scale       // L: 0-100
+	colorPreview    *gtk.Box         // swatch preview in color view
+	colorHexLabel   *gtk.Label       // hex display in color view
+	colorSwatchProv *gtk.CSSProvider // color picker preview swatch CSS
 
 	// Custom theme state (set when theme.toml exists).
 	isCustomTheme bool
@@ -74,8 +86,10 @@ type Window struct {
 func New(app *gtk.Application) *Window {
 	w := &Window{
 		tab:         "keyboard",
+		gamescope:   os.Getenv("GAMESCOPE_WAYLAND_DISPLAY") != "",
 		modeButtons: make(map[string]*gtk.CheckButton),
 		speedBtns:   make(map[string]*gtk.CheckButton),
+		profileBtns: make(map[string]*gtk.CheckButton),
 	}
 
 	w.win = gtk.NewApplicationWindow(app)
@@ -138,9 +152,13 @@ func (w *Window) show() {
 	w.backend.Show()
 }
 
-// hide delegates to the display backend.
+// hide delegates to the display backend. Resets to main view so the drawer
+// always opens to the home screen.
 func (w *Window) hide() {
 	w.visible = false
+	if w.viewStack != nil {
+		w.viewStack.SetVisibleChildName("main")
+	}
 	w.backend.Hide()
 }
 

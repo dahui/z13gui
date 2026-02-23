@@ -62,7 +62,10 @@ static void ungrab_pointer(void *xdisplay) {
 import "C"
 
 import (
+	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"unsafe"
 
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
@@ -79,8 +82,11 @@ type Backend struct {
 	xid      C.ulong
 	ready    bool // true after realize extracts XID
 
-	panel     *gtk.Box // drawer panel; margins set on realize
-	onDismiss func()
+	outputWidth  int     // from realize; used in WrapContent for sizing
+	outputHeight int     // from realize; used in WrapContent for margins
+	scale        float64 // outputWidth / 1280, clamped [1.0, 3.0]
+	panel        *gtk.Box
+	onDismiss    func()
 }
 
 // New creates a gamescope backend. drawerWidth is the drawer panel width in pixels.
@@ -117,18 +123,29 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 		b.xid = C.surface_get_xid(unsafe.Pointer(surface.Native()))         //nolint:govet // GObject pointer is C-heap-allocated and pinned; uintptr→unsafe.Pointer is safe
 		b.ready = true
 
-		// Ensure window buffer matches output resolution so gamescope's
-		// STEAM_OVERLAY rendering (no NoScale flag) doesn't scale/center.
+		// Store output dimensions for WrapContent (which runs after realize).
+		// Compute a UI scale so the drawer occupies the same physical
+		// screen fraction as KDE at 150% (~18.75% of screen width).
+		// Z13GUI_SCALE env var overrides auto-detection.
 		if monitor := display.MonitorAtSurface(surface); monitor != nil {
 			geo := monitor.Geometry()
-			b.appWin.SetDefaultSize(geo.Width(), geo.Height())
-			// Match layer-shell's 5% top/bottom margins.
-			if b.panel != nil {
-				margin := geo.Height() / 20
-				b.panel.SetMarginTop(margin)
-				b.panel.SetMarginBottom(margin)
+			b.outputWidth = geo.Width()
+			b.outputHeight = geo.Height()
+			if envScale := os.Getenv("Z13GUI_SCALE"); envScale != "" {
+				if v, err := strconv.ParseFloat(envScale, 64); err == nil && v > 0 {
+					b.scale = v
+				}
+			} else {
+				b.scale = float64(geo.Width()) / 1707.0
 			}
-			slog.Info("gamescope: sized to monitor", "w", geo.Width(), "h", geo.Height())
+			if b.scale < 1.0 {
+				b.scale = 1.0
+			}
+			if b.scale > 3.0 {
+				b.scale = 3.0
+			}
+			b.appWin.SetDefaultSize(geo.Width(), geo.Height())
+			slog.Info("gamescope: sized to monitor", "w", geo.Width(), "h", geo.Height(), "scale", b.scale)
 		}
 
 		b.setAtom("STEAM_OVERLAY", true)
@@ -171,15 +188,37 @@ func (b *Backend) WrapContent(drawer gtk.Widgetter) gtk.Widgetter {
 	})
 	backdrop.AddController(click)
 
-	// Constrain drawer to its design width.
+	// Constrain drawer to scaled width.
+	scaledWidth := int(float64(b.drawerWidth) * b.scale)
+	if scaledWidth < b.drawerWidth {
+		scaledWidth = b.drawerWidth
+	}
 	b.panel = gtk.NewBox(gtk.OrientationVertical, 0)
 	panel := b.panel
-	panel.SetSizeRequest(b.drawerWidth, -1)
+	panel.SetSizeRequest(scaledWidth, -1)
 	panel.SetHExpand(false)
-	panel.Append(drawer)
 
+	// 5% top/bottom margins (matches layer-shell backend).
+	if b.outputHeight > 0 {
+		margin := b.outputHeight / 20
+		panel.SetMarginTop(margin)
+		panel.SetMarginBottom(margin)
+	}
+
+	panel.Append(drawer)
 	wrapper.Append(backdrop)
 	wrapper.Append(panel)
+
+	// Inject resolution-scaled CSS overrides for gamescope.
+	if b.scale > 1.0 {
+		css := gtk.NewCSSProvider()
+		css.LoadFromString(b.scaledCSS())
+		gtk.StyleContextAddProviderForDisplay(
+			gdk.DisplayGetDefault(), css,
+			gtk.STYLE_PROVIDER_PRIORITY_APPLICATION+1,
+		)
+	}
+
 	return wrapper
 }
 
@@ -223,4 +262,52 @@ func (b *Backend) setAtom(name string, on bool) {
 		v = 1
 	}
 	b.setCardinal(name, v)
+}
+
+// scaledCSS returns CSS rules that override layout.css pixel values scaled by
+// the gamescope resolution factor. Loaded at PRIORITY_APPLICATION+1 so it
+// overrides the base layout.css. Only used when scale > 1.0.
+func (b *Backend) scaledCSS() string {
+	s := b.scale
+	return fmt.Sprintf(`/* Gamescope resolution scaling (%.1fx) */
+.drawer { font-size: %.0fpx; }
+.drawer checkbutton { min-height: %.0fpx; padding: %.0fpx %.0fpx; border-radius: %.0fpx; }
+.drawer .mode-grid checkbutton { min-height: %.0fpx; }
+.tab-btn { min-height: %.0fpx; }
+.drawer scale slider { min-width: %.0fpx; min-height: %.0fpx; }
+.drawer scale value { margin-bottom: %.0fpx; }
+.drawer-title { font-size: %.0fpx; letter-spacing: %.0fpx; }
+.section-group { font-size: %.0fpx; letter-spacing: %.0fpx; margin-top: %.0fpx; }
+.section-label { font-size: %.0fpx; letter-spacing: %.0fpx; margin-top: %.0fpx; margin-bottom: %.0fpx; }
+.color-swatch { min-width: %.0fpx; min-height: %.0fpx; border-radius: %.0fpx; }
+.color-preset { min-width: %.0fpx; min-height: %.0fpx; border-radius: %.0fpx; }
+.bottom-bar button { min-width: %.0fpx; min-height: %.0fpx; padding: %.0fpx; border-radius: %.0fpx; }
+.accent-label { font-size: %.0fpx; letter-spacing: %.0fpx; }
+.accent-dot { min-width: %.0fpx; min-height: %.0fpx; }
+.accent-dot-active { border-width: %.0fpx; }
+.bottom-bar .toggle-label { font-size: %.0fpx; letter-spacing: %.1fpx; }
+.bottom-bar switch { min-height: %.0fpx; min-width: %.0fpx; }
+.bottom-bar switch slider { min-width: %.0fpx; min-height: %.0fpx; }
+.view-back-btn { min-width: %.0fpx; min-height: %.0fpx; padding: %.0fpx; }`,
+		s,
+		14*s,                     // .drawer font-size
+		48*s, 4*s, 10*s, 6*s,    // checkbutton
+		52*s,                     // mode-grid checkbutton
+		48*s,                     // tab-btn
+		24*s, 24*s,               // scale slider
+		6*s,                      // scale value margin
+		11*s, 3*s,                // drawer-title
+		13*s, 2*s, 2*s,           // section-group
+		11*s, 1*s, 6*s, 2*s,     // section-label
+		28*s, 28*s, 4*s,          // color-swatch
+		28*s, 28*s, 4*s,          // color-preset
+		32*s, 32*s, 4*s, 6*s,    // bottom-bar button
+		9*s, 1*s,                 // accent-label
+		14*s, 14*s,               // accent-dot
+		2*s,                      // accent-dot-active border
+		10*s, 0.5*s,              // toggle-label
+		20*s, 36*s,               // bottom-bar switch
+		18*s, 18*s,               // switch slider
+		32*s, 32*s, 4*s,          // view-back-btn
+	)
 }

@@ -1,15 +1,21 @@
 package gui
 
-// controls.go — builds the entire drawer widget tree and theme picker popover.
+// controls.go — builds the entire drawer widget tree, theme picker, and
+// gamescope-specific view alternatives (theme view, HSL color picker view).
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/dahui/z13gui/internal/theme"
+	"github.com/diamondburned/gotk4/pkg/gdk/v4"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
 // buildContent builds the scrolled content box and returns it as the window child.
+// In gamescope mode the scrolled content, theme view, and color picker view are
+// wrapped in a gtk.Stack so views can be swapped without using popovers (which
+// create separate X11 windows that gamescope doesn't composite).
 func (w *Window) buildContent() gtk.Widgetter {
 	outer := gtk.NewBox(gtk.OrientationVertical, 0)
 	outer.AddCSSClass("drawer")
@@ -21,7 +27,6 @@ func (w *Window) buildContent() gtk.Widgetter {
 	title.SetMarginTop(10)
 	title.SetMarginBottom(6)
 	title.SetMarginStart(14)
-	outer.Append(title)
 
 	inner := gtk.NewBox(gtk.OrientationVertical, 8)
 	inner.SetMarginTop(4)
@@ -41,8 +46,8 @@ func (w *Window) buildContent() gtk.Widgetter {
 	inner.Append(w.buildModeSection())
 
 	// Initialize color inputs here so syncModeVis can reference them.
-	w.color1 = w.newColorInput("FF0000", "color1-swatch")
-	w.color2 = w.newColorInput("000000", "color2-swatch")
+	w.color1 = w.newColorInput("FF0000", "color1-swatch", "COLOR 1")
+	w.color2 = w.newColorInput("000000", "color2-swatch", "COLOR 2")
 	w.updateSwatches()
 
 	w.color1Box = colorSubBox("COLOR 1", w.color1.row)
@@ -62,7 +67,24 @@ func (w *Window) buildContent() gtk.Widgetter {
 	scroll.SetVExpand(true)
 	scroll.SetChild(inner)
 
-	outer.Append(scroll)
+	if w.gamescope {
+		w.viewStack = gtk.NewStack()
+		w.viewStack.SetTransitionType(gtk.StackTransitionTypeCrossfade)
+		w.viewStack.SetVExpand(true)
+
+		mainPage := gtk.NewBox(gtk.OrientationVertical, 0)
+		mainPage.Append(title)
+		mainPage.Append(scroll)
+		w.viewStack.AddNamed(mainPage, "main")
+		w.viewStack.AddNamed(w.buildThemeView(), "theme")
+		w.viewStack.AddNamed(w.buildColorPickerView(), "color")
+		w.viewStack.SetVisibleChildName("main")
+		outer.Append(w.viewStack)
+	} else {
+		outer.Append(title)
+		outer.Append(scroll)
+	}
+
 	outer.Append(w.buildBottomBar())
 	return outer
 }
@@ -77,11 +99,19 @@ func (w *Window) buildBottomBar() *gtk.Box {
 	bar.SetMarginBottom(8)
 	bar.SetMarginStart(10)
 
-	paletteBtn := gtk.NewMenuButton()
-	paletteBtn.SetIconName("preferences-desktop-color-symbolic")
-	paletteBtn.SetTooltipText("Choose theme")
-	paletteBtn.SetPopover(w.buildThemePopover())
-	bar.Append(paletteBtn)
+	if w.gamescope {
+		paletteBtn := gtk.NewButton()
+		paletteBtn.SetIconName("preferences-desktop-color-symbolic")
+		paletteBtn.SetTooltipText("Choose theme")
+		paletteBtn.ConnectClicked(func() { w.showThemeView() })
+		bar.Append(paletteBtn)
+	} else {
+		paletteBtn := gtk.NewMenuButton()
+		paletteBtn.SetIconName("preferences-desktop-color-symbolic")
+		paletteBtn.SetTooltipText("Choose theme")
+		paletteBtn.SetPopover(w.buildThemePopover())
+		bar.Append(paletteBtn)
+	}
 
 	// Spacer pushes toggles to the right.
 	spacer := gtk.NewBox(gtk.OrientationHorizontal, 0)
@@ -126,6 +156,7 @@ func (w *Window) buildToggle(label, tooltip string, sw **gtk.Switch, onChange fu
 }
 
 // buildThemePopover builds the theme selection popover with accent color dots.
+// Used in KDE mode; in gamescope mode buildThemeView is used instead.
 func (w *Window) buildThemePopover() *gtk.Popover {
 	pop := gtk.NewPopover()
 	pop.AddCSSClass("z13-popover")
@@ -142,6 +173,43 @@ func (w *Window) buildThemePopover() *gtk.Popover {
 	title.SetMarginBottom(4)
 	box.Append(title)
 
+	w.appendThemeChoices(box)
+
+	scroll := gtk.NewScrolledWindow()
+	scroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
+	scroll.SetMaxContentHeight(500)
+	scroll.SetPropagateNaturalHeight(true)
+	scroll.SetChild(box)
+	pop.SetChild(scroll)
+	return pop
+}
+
+// buildThemeView builds the theme picker as a full scrollable view for gamescope.
+// Used instead of the popover which creates a separate X11 window.
+func (w *Window) buildThemeView() *gtk.Box {
+	view := gtk.NewBox(gtk.OrientationVertical, 0)
+
+	header := w.buildViewHeader("Theme", func() { w.showMainView() })
+	view.Append(header)
+
+	content := gtk.NewBox(gtk.OrientationVertical, 2)
+	content.SetMarginTop(4)
+	content.SetMarginBottom(12)
+	content.SetMarginStart(12)
+	content.SetMarginEnd(12)
+	w.appendThemeChoices(content)
+
+	scroll := gtk.NewScrolledWindow()
+	scroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
+	scroll.SetVExpand(true)
+	scroll.SetChild(content)
+	view.Append(scroll)
+	return view
+}
+
+// appendThemeChoices appends the theme radio buttons and accent dots to box.
+// Shared between buildThemePopover (KDE) and buildThemeView (gamescope).
+func (w *Window) appendThemeChoices(box *gtk.Box) {
 	activeCfg := theme.LoadAppConfig()
 	var first *gtk.CheckButton
 	for _, t := range theme.Builtins {
@@ -209,7 +277,6 @@ func (w *Window) buildThemePopover() *gtk.Popover {
 			customBtn.SetGroup(first)
 		}
 		customBtn.SetActive(true)
-		// Clicking re-applies the base custom colors (resets accent to default).
 		customBtn.ConnectToggled(func() {
 			if customBtn.Active() {
 				w.applyCustomAccent("")
@@ -254,14 +321,130 @@ func (w *Window) buildThemePopover() *gtk.Popover {
 			box.Append(dotsGrid)
 		}
 	}
+}
 
-	scroll := gtk.NewScrolledWindow()
-	scroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
-	scroll.SetMaxContentHeight(500)
-	scroll.SetPropagateNaturalHeight(true)
-	scroll.SetChild(box)
-	pop.SetChild(scroll)
-	return pop
+// buildColorPickerView builds the HSL color picker view for gamescope mode.
+// Contains preset buttons, hue/saturation/lightness sliders, and a preview swatch.
+func (w *Window) buildColorPickerView() *gtk.Box {
+	view := gtk.NewBox(gtk.OrientationVertical, 8)
+	view.SetMarginStart(12)
+	view.SetMarginEnd(12)
+
+	// Header: back button + dynamic title.
+	w.colorViewTitle = gtk.NewLabel("COLOR")
+	view.Append(w.buildColorViewHeader())
+
+	// 8 preset buttons.
+	presetsRow := gtk.NewBox(gtk.OrientationHorizontal, 4)
+	for _, hex := range presetColors {
+		h := hex
+		btn := gtk.NewButton()
+		btn.AddCSSClass("color-preset")
+		btn.SetHExpand(true)
+		p := gtk.NewCSSProvider()
+		p.LoadFromString(fmt.Sprintf("button.color-preset { background: #%s; }", h))
+		btn.StyleContext().AddProvider(p, gtk.STYLE_PROVIDER_PRIORITY_USER+5) //nolint:staticcheck // per-widget dynamic color
+		btn.ConnectClicked(func() { w.colorPickerPresetClicked(h) })
+		presetsRow.Append(btn)
+	}
+	view.Append(presetsRow)
+
+	// HSL sliders.
+	w.colorHue = w.buildHSLScale("HUE", 0, 360)
+	w.colorSat = w.buildHSLScale("SATURATION", 0, 100)
+	w.colorLit = w.buildHSLScale("LIGHTNESS", 0, 100)
+
+	view.Append(hslScaleBox("HUE", w.colorHue))
+	view.Append(hslScaleBox("SATURATION", w.colorSat))
+	view.Append(hslScaleBox("LIGHTNESS", w.colorLit))
+
+	// Preview swatch + hex label.
+	w.colorSwatchProv = gtk.NewCSSProvider()
+	gtk.StyleContextAddProviderForDisplay(
+		gdk.DisplayGetDefault(), w.colorSwatchProv,
+		gtk.STYLE_PROVIDER_PRIORITY_USER+10,
+	)
+
+	w.colorPreview = gtk.NewBox(gtk.OrientationHorizontal, 0)
+	w.colorPreview.AddCSSClass("color-swatch")
+	w.colorPreview.SetName("color-picker-preview")
+
+	w.colorHexLabel = gtk.NewLabel("#FF0000")
+	w.colorHexLabel.AddCSSClass("section-label")
+
+	previewRow := gtk.NewBox(gtk.OrientationHorizontal, 8)
+	previewRow.SetMarginTop(4)
+	previewRow.Append(w.colorPreview)
+	previewRow.Append(w.colorHexLabel)
+	view.Append(previewRow)
+
+	return view
+}
+
+// buildColorViewHeader builds the header for the color picker view with a back
+// button and the dynamic color title label.
+func (w *Window) buildColorViewHeader() *gtk.Box {
+	header := gtk.NewBox(gtk.OrientationHorizontal, 8)
+	header.SetMarginTop(10)
+	header.SetMarginBottom(6)
+	backBtn := gtk.NewButton()
+	backBtn.SetIconName("go-previous-symbolic")
+	backBtn.AddCSSClass("view-back-btn")
+	backBtn.ConnectClicked(func() { w.showMainView() })
+	header.Append(backBtn)
+	w.colorViewTitle.SetHAlign(gtk.AlignStart)
+	w.colorViewTitle.AddCSSClass("drawer-title")
+	header.Append(w.colorViewTitle)
+	return header
+}
+
+// buildHSLScale creates a Scale for an HSL component.
+func (w *Window) buildHSLScale(name string, min, max float64) *gtk.Scale {
+	sc := gtk.NewScaleWithRange(gtk.OrientationHorizontal, min, max, 1)
+	sc.SetDigits(0)
+	sc.SetDrawValue(true)
+	sc.ConnectValueChanged(func() { w.onHSLChanged() })
+	return sc
+}
+
+// hslScaleBox wraps a section label + scale into a box.
+func hslScaleBox(label string, sc *gtk.Scale) *gtk.Box {
+	box := gtk.NewBox(gtk.OrientationVertical, 2)
+	box.Append(sectionLabel(label))
+	box.Append(sc)
+	return box
+}
+
+// buildViewHeader builds a header bar with a back button and title label.
+func (w *Window) buildViewHeader(titleText string, onBack func()) *gtk.Box {
+	header := gtk.NewBox(gtk.OrientationHorizontal, 8)
+	header.SetMarginTop(10)
+	header.SetMarginBottom(6)
+	header.SetMarginStart(14)
+	backBtn := gtk.NewButton()
+	backBtn.SetIconName("go-previous-symbolic")
+	backBtn.AddCSSClass("view-back-btn")
+	backBtn.ConnectClicked(func() { onBack() })
+	header.Append(backBtn)
+	lbl := gtk.NewLabel(titleText)
+	lbl.SetHAlign(gtk.AlignStart)
+	lbl.AddCSSClass("drawer-title")
+	header.Append(lbl)
+	return header
+}
+
+// showMainView switches the gamescope view stack to the main drawer view.
+func (w *Window) showMainView() {
+	if w.viewStack != nil {
+		w.viewStack.SetVisibleChildName("main")
+	}
+}
+
+// showThemeView switches the gamescope view stack to the theme picker view.
+func (w *Window) showThemeView() {
+	if w.viewStack != nil {
+		w.viewStack.SetVisibleChildName("theme")
+	}
 }
 
 // buildTabRow creates the Keyboard / Lightbar tab radio buttons.
@@ -390,28 +573,32 @@ func (w *Window) buildBrightnessBox() *gtk.Box {
 // profiles lists the available sysfs performance profiles.
 var profiles = []string{"quiet", "balanced", "performance"}
 
-// buildProfileSection creates the profile dropdown (quiet/balanced/performance).
+// buildProfileSection creates the profile radio buttons (quiet/balanced/performance).
 func (w *Window) buildProfileSection() *gtk.Box {
 	box := gtk.NewBox(gtk.OrientationVertical, 4)
 	box.Append(sectionLabel("PROFILE"))
 
-	labels := make([]string, len(profiles))
-	for i, p := range profiles {
-		labels[i] = strings.Title(p) //nolint:staticcheck // strings.Title is fine for ASCII-only mode/speed/profile labels
+	row := gtk.NewBox(gtk.OrientationHorizontal, 4)
+	var first *gtk.CheckButton
+	for _, p := range profiles {
+		prof := p
+		btn := gtk.NewCheckButtonWithLabel(strings.Title(prof)) //nolint:staticcheck // strings.Title is fine for ASCII-only mode/speed/profile labels
+		if first == nil {
+			first = btn
+		} else {
+			btn.SetGroup(first)
+		}
+		btn.SetHExpand(true)
+		btn.ConnectToggled(func() {
+			if btn.Active() && !w.syncing {
+				w.sendProfileSet(prof)
+			}
+		})
+		w.profileBtns[prof] = btn
+		row.Append(btn)
 	}
-	dd := gtk.NewDropDownFromStrings(labels)
-	dd.NotifyProperty("selected", func() {
-		if w.syncing {
-			return
-		}
-		idx := dd.Selected()
-		if int(idx) >= len(profiles) {
-			return
-		}
-		w.sendProfileSet(profiles[idx])
-	})
-	w.profileDrop = dd
-	box.Append(dd)
+
+	box.Append(row)
 	return box
 }
 

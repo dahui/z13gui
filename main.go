@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/dahui/z13gui/internal/gui"
 	"github.com/dahui/z13gui/internal/theme"
@@ -59,9 +60,21 @@ func main() {
 	// Gamescope advertises Wayland layer-shell but doesn't implement
 	// anchoring/margins. Force GTK4 to use X11 so we can set gamescope
 	// overlay atoms instead. Must be set before GDK initialization.
-	if os.Getenv("GAMESCOPE_WAYLAND_DISPLAY") != "" {
-		slog.Info("gamescope detected, forcing X11 backend")
-		_ = os.Setenv("GDK_BACKEND", "x11")
+	// Validate the socket exists to handle stale gamescope-environment
+	// files left over from a previous Gaming Mode session.
+	if gsDisplay := os.Getenv("GAMESCOPE_WAYLAND_DISPLAY"); gsDisplay != "" {
+		runtime := os.Getenv("XDG_RUNTIME_DIR")
+		socket := filepath.Join(runtime, gsDisplay)
+		if runtime == "" {
+			slog.Warn("GAMESCOPE_WAYLAND_DISPLAY set but XDG_RUNTIME_DIR missing, ignoring")
+			_ = os.Unsetenv("GAMESCOPE_WAYLAND_DISPLAY")
+		} else if _, err := os.Stat(socket); err != nil {
+			slog.Info("gamescope socket missing (stale env?), using wayland", "path", socket)
+			_ = os.Unsetenv("GAMESCOPE_WAYLAND_DISPLAY")
+		} else {
+			slog.Info("gamescope detected, forcing X11 backend")
+			_ = os.Setenv("GDK_BACKEND", "x11")
+		}
 	}
 
 	app := gtk.NewApplication("com.github.dahui.z13gui", 0)
