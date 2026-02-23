@@ -60,6 +60,8 @@ func (w *Window) syncState() {
 	w.syncLightingSection()
 	w.syncProfile()
 	w.syncBattery()
+	w.syncOverdrive()
+	w.syncBootSound()
 }
 
 // syncLightingSection updates mode, colors, speed, and brightness from the
@@ -206,4 +208,34 @@ func (w *Window) initBatteryDebounce(sc *gtk.Scale) {
 			})
 		})
 	})
+}
+
+// syncOverdrive sets the overdrive switch to match the daemon state.
+func (w *Window) syncOverdrive() {
+	if w.state == nil || w.overdriveSwitch == nil {
+		return
+	}
+	w.overdriveSwitch.SetActive(w.state.PanelOverdrive != 0)
+}
+
+// syncBootSound sets the boot sound switch to match the daemon state.
+func (w *Window) syncBootSound() {
+	if w.state == nil || w.bootSoundSwitch == nil {
+		return
+	}
+	w.bootSoundSwitch.SetActive(w.state.BootSound != 0)
+}
+
+// sendOverdriveSet sends a panel overdrive change to the daemon.
+func (w *Window) sendOverdriveSet(value int) {
+	if _, err := api.SendPanelOverdriveSet(value); err != nil {
+		slog.Warn("panel overdrive set failed", "value", value, "err", err)
+	}
+}
+
+// sendBootSoundSet sends a boot sound change to the daemon.
+func (w *Window) sendBootSoundSet(value int) {
+	if _, err := api.SendBootSoundSet(value); err != nil {
+		slog.Warn("boot sound set failed", "value", value, "err", err)
+	}
 }

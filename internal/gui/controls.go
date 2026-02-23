@@ -82,7 +82,45 @@ func (w *Window) buildBottomBar() *gtk.Box {
 	paletteBtn.SetPopover(w.buildThemePopover())
 	bar.Append(paletteBtn)
 
+	// Spacer pushes toggles to the right.
+	spacer := gtk.NewBox(gtk.OrientationHorizontal, 0)
+	spacer.SetHExpand(true)
+	bar.Append(spacer)
+
+	bar.Append(w.buildToggle("Panel Overdrive", &w.overdriveSwitch, func(active bool) {
+		v := 0
+		if active {
+			v = 1
+		}
+		w.sendOverdriveSet(v)
+	}))
+	bar.Append(w.buildToggle("Boot Sound", &w.bootSoundSwitch, func(active bool) {
+		v := 0
+		if active {
+			v = 1
+		}
+		w.sendBootSoundSet(v)
+	}))
+
 	return bar
+}
+
+// buildToggle creates a compact label + switch pair for the bottom bar.
+func (w *Window) buildToggle(label string, sw **gtk.Switch, onChange func(bool)) *gtk.Box {
+	box := gtk.NewBox(gtk.OrientationHorizontal, 4)
+	lbl := gtk.NewLabel(label)
+	lbl.AddCSSClass("toggle-label")
+	s := gtk.NewSwitch()
+	s.ConnectStateSet(func(state bool) bool {
+		if !w.syncing {
+			onChange(state)
+		}
+		return false
+	})
+	*sw = s
+	box.Append(lbl)
+	box.Append(s)
+	return box
 }
 
 // buildThemePopover builds the theme selection popover with accent color dots.

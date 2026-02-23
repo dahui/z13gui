@@ -60,7 +60,9 @@ type Window struct {
 	speedBtns   map[string]*gtk.CheckButton
 	brightScale *gtk.Scale
 	profileDrop *gtk.DropDown
-	battScale   *gtk.Scale
+	battScale       *gtk.Scale
+	overdriveSwitch *gtk.Switch
+	bootSoundSwitch *gtk.Switch
 
 	syncing    bool        // true while syncState is updating widgets; suppresses sendApply
 	applyTimer *time.Timer // debounce for continuous inputs (brightness, color wheel)

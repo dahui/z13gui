@@ -107,6 +107,18 @@
     border-style: solid;
 }
 
+/* Footer toggle labels — small, compact */
+.bottom-bar .toggle-label {
+    font-size: 10px;
+    letter-spacing: 0.5px;
+}
+
+/* Footer switches — keep compact */
+.bottom-bar switch {
+    min-height: 20px;
+    min-width: 36px;
+}
+
 /* Scrolled container inside theme picker popover */
 popover.z13-popover scrolledwindow {
     background: transparent;
