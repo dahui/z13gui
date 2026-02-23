@@ -30,7 +30,7 @@ touches HID devices or sysfs directly.
 
 ## Requirements
 
-- Wayland compositor (tested on KDE Plasma and Hyprland)
+- Wayland compositor (tested on KDE Plasma)
 - `gtk4-layer-shell` library (pkg-config: `gtk4-layer-shell-0`)
 - `z13ctl` daemon running (see [z13ctl installation](https://github.com/dahui/z13ctl#installation))
 
@@ -177,7 +177,7 @@ During development, if you need to work against a local copy of the z13ctl API
 module, create a `go.work` file (it is gitignored):
 
 ```sh
-go work init . ../z13rgb/api
+go work init . ../z13ctl/api
 ```
 
 **Before submitting a pull request:**
