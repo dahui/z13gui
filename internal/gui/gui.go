@@ -219,32 +219,44 @@ func (w *Window) loadCSS() {
 	tomlPath := filepath.Join(base, "z13gui", "theme.toml")
 	cssPath := filepath.Join(base, "z13gui", "theme.css")
 
+	var loaded bool
 	switch {
 	case fileExists(tomlPath):
-		data, _ := os.ReadFile(tomlPath)
-		colors, accents := theme.ParseThemeTOMLFull(data)
-		w.isCustomTheme = true
-		w.customColors = colors
-		w.customAccents = accents
-		// Restore the user's last accent selection from config.toml.
-		if len(accents) > 0 {
-			cfg := theme.LoadAppConfig()
-			if cfg.Accent != "" {
-				for _, a := range accents {
-					if a.ID == cfg.Accent {
-						colors.Accent = a.Hex
-						break
+		data, err := os.ReadFile(tomlPath)
+		if err != nil {
+			slog.Warn("failed to read custom theme TOML, using default", "path", tomlPath, "err", err)
+		} else {
+			colors, accents := theme.ParseThemeTOMLFull(data)
+			w.isCustomTheme = true
+			w.customColors = colors
+			w.customAccents = accents
+			// Restore the user's last accent selection from config.toml.
+			if len(accents) > 0 {
+				cfg := theme.LoadAppConfig()
+				if cfg.Accent != "" {
+					for _, a := range accents {
+						if a.ID == cfg.Accent {
+							colors.Accent = a.Hex
+							break
+						}
 					}
 				}
 			}
+			w.themeProvider.LoadFromString(theme.BuildThemeCSS(colors, defaultThemeCSS))
+			slog.Info("theme loaded", "source", "custom-toml", "path", tomlPath)
+			loaded = true
 		}
-		w.themeProvider.LoadFromString(theme.BuildThemeCSS(colors, defaultThemeCSS))
-		slog.Info("theme loaded", "source", "custom-toml", "path", tomlPath)
 	case fileExists(cssPath):
-		data, _ := os.ReadFile(cssPath)
-		w.themeProvider.LoadFromString(string(data))
-		slog.Info("theme loaded", "source", "custom-css", "path", cssPath)
-	default:
+		data, err := os.ReadFile(cssPath)
+		if err != nil {
+			slog.Warn("failed to read custom theme CSS, using default", "path", cssPath, "err", err)
+		} else {
+			w.themeProvider.LoadFromString(string(data))
+			slog.Info("theme loaded", "source", "custom-css", "path", cssPath)
+			loaded = true
+		}
+	}
+	if !loaded {
 		cfg := theme.LoadAppConfig()
 		colors, ok := theme.BuiltinByID(cfg.Theme)
 		if !ok {
