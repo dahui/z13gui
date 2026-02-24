@@ -42,7 +42,8 @@ type Reader struct {
 	dispatch  func(func()) // wraps glib.IdleAdd; injected to avoid glib import
 
 	mu      sync.Mutex
-	devices map[string]struct{} // tracked device paths
+	devices map[string]*evdev.InputDevice // tracked device paths → open device
+	grabbed bool                          // true while overlay is visible (exclusive grab)
 	stop    chan struct{}
 }
 
@@ -54,7 +55,7 @@ func New(handler Handler, isVisible func() bool, dispatch func(func())) *Reader 
 		handler:   handler,
 		isVisible: isVisible,
 		dispatch:  dispatch,
-		devices:   make(map[string]struct{}),
+		devices:   make(map[string]*evdev.InputDevice),
 		stop:      make(chan struct{}),
 	}
 }
@@ -80,6 +81,31 @@ func (r *Reader) Stop() {
 	case <-r.stop:
 	default:
 		close(r.stop)
+	}
+}
+
+// GrabAll acquires exclusive access (EVIOCGRAB) on all tracked gamepad devices
+// so events are not delivered to other readers (e.g. the background game).
+// New devices discovered while grabbed are auto-grabbed in tryOpen.
+func (r *Reader) GrabAll() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.grabbed = true
+	for path, dev := range r.devices {
+		if err := dev.Grab(); err != nil {
+			slog.Debug("gamepad: grab failed", "path", path, "err", err)
+		}
+	}
+}
+
+// UngrabAll releases exclusive access on all tracked gamepad devices,
+// allowing the background game to receive events again.
+func (r *Reader) UngrabAll() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.grabbed = false
+	for _, dev := range r.devices {
+		_ = dev.Ungrab()
 	}
 }
 
@@ -115,7 +141,12 @@ func (r *Reader) tryOpen(path string) bool {
 		return false
 	}
 	r.mu.Lock()
-	r.devices[path] = struct{}{}
+	r.devices[path] = dev
+	if r.grabbed {
+		if err := dev.Grab(); err != nil {
+			slog.Debug("gamepad: grab failed on open", "path", path, "err", err)
+		}
+	}
 	r.mu.Unlock()
 	go r.readLoop(path, dev)
 	return true
@@ -142,10 +173,13 @@ const (
 // disconnects or the reader is stopped.
 func (r *Reader) readLoop(path string, dev *evdev.InputDevice) {
 	defer func() {
-		_ = dev.Close()
 		r.mu.Lock()
+		if r.grabbed {
+			_ = dev.Ungrab()
+		}
 		delete(r.devices, path)
 		r.mu.Unlock()
+		_ = dev.Close()
 		slog.Info("gamepad: device disconnected", "path", path)
 	}()
 

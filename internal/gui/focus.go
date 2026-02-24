@@ -264,6 +264,7 @@ func (w *Window) setFocusIdx(idx int) {
 	w.focusIdx = idx
 	if idx < len(w.focusItems) {
 		gtk.BaseWidget(w.focusItems[idx].widget).AddCSSClass("gamepad-focus")
+		w.ensureVisible(w.focusItems[idx].widget)
 		slog.Debug("gamepad: focus", "idx", idx,
 			"row", w.focusItems[idx].row, "col", w.focusItems[idx].col,
 			"section", w.focusItems[idx].section)
@@ -316,6 +317,41 @@ func (w *Window) swapFocusList(items []focusItem) {
 			}
 		}
 	}
+}
+
+// ensureVisible scrolls the active ScrolledWindow so that widget is in view.
+// Translates the widget's position to viewport-relative coordinates, then
+// converts to content-relative coordinates for ClampPage.
+func (w *Window) ensureVisible(widget gtk.Widgetter) {
+	var scroll *gtk.ScrolledWindow
+	if w.viewStack != nil {
+		switch w.viewStack.VisibleChildName() {
+		case "main":
+			scroll = w.mainScroll
+		case "theme":
+			scroll = w.themeScroll
+		default:
+			return // color view has no scroll
+		}
+	}
+	if scroll == nil {
+		return
+	}
+
+	adj := scroll.VAdjustment()
+	base := gtk.BaseWidget(widget)
+
+	// TranslateCoordinates gives viewport-relative Y (GTK4 accounts for
+	// scroll transforms). Add the current scroll offset to get the widget's
+	// position in the full scroll content.
+	_, viewY, ok := base.TranslateCoordinates(&scroll.Widget, 0, 0) //nolint:staticcheck // TranslateCoordinates is deprecated in GTK4 but avoids graphene import; still works in gotk4
+	if !ok {
+		return
+	}
+	contentY := adj.Value() + viewY
+	h := float64(base.Height())
+	const scrollPadding = 20 // breathing room below focused widget
+	adj.ClampPage(contentY, contentY+h+scrollPadding)
 }
 
 // scaleAdjust returns onLeft/onRight/getValue/setValue functions for a slider.

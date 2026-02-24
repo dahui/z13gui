@@ -82,26 +82,25 @@ func (w *Window) buildContent() gtk.Widgetter {
 	scroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
 	scroll.SetVExpand(true)
 	scroll.SetChild(inner)
+	w.mainScroll = scroll
 
 	// Stack with main, theme, and color views — used in both modes.
 	w.viewStack = gtk.NewStack()
-	w.viewStack.SetTransitionType(gtk.StackTransitionTypeCrossfade)
+	w.viewStack.SetTransitionType(gtk.StackTransitionTypeNone)
 	w.viewStack.SetVExpand(true)
 
 	mainPage := gtk.NewBox(gtk.OrientationVertical, 0)
 	mainPage.Append(title)
 	mainPage.Append(scroll)
 	w.viewStack.AddNamed(mainPage, "main")
-	w.viewStack.AddNamed(w.buildThemeView(), "theme")
-	w.viewStack.AddNamed(w.buildColorPickerView(), "color")
+	// Theme and color views are lazy-loaded on first navigation
+	// to keep the initial widget tree small for fast animation.
 	w.viewStack.SetVisibleChildName("main")
 	outer.Append(w.viewStack)
 
 	outer.Append(w.buildBottomBar())
 
 	w.buildMainFocusList()
-	w.buildThemeFocusList()
-	w.buildColorFocusList()
 	w.focusItems = w.mainFocusItems
 
 	return outer
@@ -199,6 +198,7 @@ func (w *Window) buildThemeView() *gtk.Box {
 	scroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
 	scroll.SetVExpand(true)
 	scroll.SetChild(content)
+	w.themeScroll = scroll
 	view.Append(scroll)
 	return view
 }
@@ -438,11 +438,17 @@ func (w *Window) showMainView() {
 }
 
 // showThemeView switches the view stack to the theme picker view.
+// The theme view is lazy-built on first access to keep the initial widget tree small.
 func (w *Window) showThemeView() {
-	if w.viewStack != nil {
-		w.viewStack.SetVisibleChildName("theme")
-		w.swapFocusList(w.themeFocusItems)
+	if w.viewStack == nil {
+		return
 	}
+	if w.themeScroll == nil {
+		w.viewStack.AddNamed(w.buildThemeView(), "theme")
+		w.buildThemeFocusList()
+	}
+	w.viewStack.SetVisibleChildName("theme")
+	w.swapFocusList(w.themeFocusItems)
 }
 
 // buildTabRow creates the Keyboard / Lightbar tab radio buttons.

@@ -68,7 +68,9 @@ type Window struct {
 	applyTimer *time.Timer // debounce for continuous inputs (brightness, color wheel)
 
 	// View switching (main/theme/color views).
-	viewStack          *gtk.Stack       // switches between main/theme/color views
+	mainScroll         *gtk.ScrolledWindow // scrollable area in main drawer view
+	themeScroll        *gtk.ScrolledWindow // scrollable area in theme picker view
+	viewStack          *gtk.Stack          // switches between main/theme/color views
 	editingColor       *colorInput      // which color the color-picker view is editing
 	colorViewTitle     *gtk.Label       // "COLOR 1" or "COLOR 2" in color view header
 	colorHue           *gtk.Scale       // H: 0-360
@@ -209,6 +211,9 @@ func (w *Window) Toggle() {
 func (w *Window) show() {
 	slog.Debug("show called")
 	w.visible = true
+	if w.gamepadReader != nil {
+		go w.gamepadReader.GrabAll()
+	}
 	w.backend.Show()
 }
 
@@ -217,6 +222,10 @@ func (w *Window) show() {
 func (w *Window) hide() {
 	slog.Debug("hide called", "wasVisible", w.visible)
 	w.visible = false
+	if w.gamepadReader != nil {
+		go w.gamepadReader.UngrabAll()
+	}
+	w.hideGamepadFocus()
 	if w.viewStack != nil {
 		w.viewStack.SetVisibleChildName("main")
 		w.swapFocusList(w.mainFocusItems)
@@ -292,7 +301,7 @@ func (w *Window) subscribeLoop() {
 		if err != nil || ch == nil {
 			slog.Info("daemon disconnected, retrying", "backoff", backoff)
 			time.Sleep(backoff)
-			if backoff < 30*time.Second {
+			if backoff < 3*time.Second {
 				backoff *= 2
 			}
 			continue
@@ -301,6 +310,7 @@ func (w *Window) subscribeLoop() {
 		backoff = time.Second
 		for event := range ch {
 			if event == "gui-toggle" {
+				slog.Debug("gui-toggle received, dispatching")
 				glib.TimeoutAdd(0, func() bool {
 					w.Toggle()
 					return false
