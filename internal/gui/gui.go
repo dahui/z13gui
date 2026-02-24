@@ -315,6 +315,7 @@ func (w *Window) subscribeLoop() {
 					w.Toggle()
 					return false
 				})
+				glib.MainContextDefault().Wakeup()
 			}
 		}
 		cancel()

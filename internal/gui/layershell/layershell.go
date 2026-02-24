@@ -27,6 +27,7 @@ type Backend struct {
 	hiddenMargin  int
 	margin        int    // current right margin: 0=on-screen, hiddenMargin=off-screen
 	animGen       uint64 // incremented to cancel in-flight animations
+	animating     bool   // true during show/hide animation; suppresses focus-loss dismiss
 	pointerInside bool   // true when pointer is over the drawer surface
 }
 
@@ -100,14 +101,18 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 		if active || !vis {
 			return
 		}
+		if b.animating {
+			slog.Debug("focus lost during animation, ignoring")
+			return
+		}
 		if b.pointerInside {
 			slog.Debug("focus lost but pointer inside drawer, ignoring spurious drop")
 			return
 		}
 		slog.Debug("focus lost with pointer outside, dismissing after delay")
 		glib.TimeoutAdd(200, func() bool {
-			if !isVisible() || b.appWin.IsActive() {
-				slog.Debug("dismiss cancelled: hidden or refocused")
+			if !isVisible() || b.appWin.IsActive() || b.animating {
+				slog.Debug("dismiss cancelled: hidden, refocused, or animating")
 				return false
 			}
 			slog.Debug("dismiss confirmed: focus still lost")
@@ -143,6 +148,7 @@ func (b *Backend) Show() {
 
 	b.animGen++
 	gen := b.animGen
+	b.animating = true
 	startMargin := b.margin
 	startTime := time.Now()
 
@@ -156,6 +162,23 @@ func (b *Backend) Show() {
 			b.margin = 0
 			gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeRight, 0)
 			slog.Debug("show anim complete", "gen", gen)
+
+			// Surface is now fully on-screen. Present again so the compositor
+			// grants focus to the visible surface (the initial Present() fired
+			// while the surface was still off-screen).
+			b.appWin.Present()
+
+			// Keep animating guard active for 300ms after show completes.
+			// KDE Plasma's async keyboard-mode handling can send delayed
+			// focus revocations after SetKeyboardMode(OnDemand); the grace
+			// period lets the compositor settle before we honour dismiss events.
+			glib.TimeoutAdd(300, func() bool {
+				if b.animGen == gen {
+					b.animating = false
+					b.appWin.Present()
+				}
+				return false
+			})
 			return false
 		}
 		t = t * t * (3 - 2*t) // smoothstep
@@ -169,10 +192,18 @@ func (b *Backend) Show() {
 // Hide starts the slide-out animation.
 func (b *Backend) Hide() {
 	slog.Debug("backend.Hide", "startMargin", b.margin, "gen", b.animGen+1)
+
+	// Clear GTK's internal focused-widget state before relinquishing keyboard
+	// interactivity. Without this, GTK retains a stale focus reference that
+	// prevents the compositor from cleanly re-granting focus on the next Show().
+	b.gtkWin.SetFocus(nil)
+
 	gtk4layershell.SetKeyboardMode(b.gtkWin, gtk4layershell.LayerShellKeyboardModeNone)
 
 	b.animGen++
 	gen := b.animGen
+	b.animating = true
+	b.pointerInside = false // clear stale state; surface stays mapped off-screen
 	startMargin := b.margin
 	startTime := time.Now()
 
@@ -184,6 +215,7 @@ func (b *Backend) Hide() {
 		t := float64(time.Since(startTime)) / float64(animDuration)
 		if t >= 1.0 {
 			b.margin = b.hiddenMargin
+			b.animating = false
 			gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeRight, b.hiddenMargin)
 			slog.Debug("hide anim complete", "gen", gen)
 			return false
