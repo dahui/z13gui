@@ -40,24 +40,12 @@ static int grab_keyboard(void *xdisplay, unsigned long xid) {
                          GrabModeAsync, GrabModeAsync, CurrentTime);
 }
 
-// grab_pointer grabs pointer input to the specified window.
-static int grab_pointer(void *xdisplay, unsigned long xid) {
-    return XGrabPointer((Display *)xdisplay, xid, True,
-        ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
-        GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
-}
-
 // ungrab_keyboard releases the keyboard grab.
 static void ungrab_keyboard(void *xdisplay) {
     XUngrabKeyboard((Display *)xdisplay, CurrentTime);
     XFlush((Display *)xdisplay);
 }
 
-// ungrab_pointer releases the pointer grab.
-static void ungrab_pointer(void *xdisplay) {
-    XUngrabPointer((Display *)xdisplay, CurrentTime);
-    XFlush((Display *)xdisplay);
-}
 */
 import "C"
 
@@ -223,15 +211,17 @@ func (b *Backend) WrapContent(drawer gtk.Widgetter) gtk.Widgetter {
 }
 
 // Show makes the overlay visible by setting full opacity and captures input
-// via X11 grabs (primary) and STEAM_INPUT_FOCUS (secondary, for production).
+// via STEAM_INPUT_FOCUS atom and an X11 keyboard grab. No pointer grab is
+// used — XGrabPointer's core event mask interferes with XI2 touch delivery,
+// breaking button/radio-button touch activation. STEAM_INPUT_FOCUS handles
+// pointer/touch routing natively in gamescope.
 func (b *Backend) Show() {
 	slog.Debug("gamescope: Show enter", "ready", b.ready)
 	if b.ready {
 		b.setCardinal("_NET_WM_WINDOW_OPACITY", 0xFFFFFFFF)
 		b.setAtom("STEAM_INPUT_FOCUS", true)
 		kbResult := C.grab_keyboard(b.xdisplay, b.xid)
-		ptrResult := C.grab_pointer(b.xdisplay, b.xid)
-		slog.Debug("gamescope: overlay shown", "grabKB", int(kbResult), "grabPtr", int(ptrResult))
+		slog.Debug("gamescope: overlay shown", "grabKB", int(kbResult))
 	} else {
 		slog.Warn("gamescope: Show() called but XID not ready")
 	}
@@ -243,7 +233,6 @@ func (b *Backend) Hide() {
 	slog.Debug("gamescope: Hide enter", "ready", b.ready)
 	if b.ready {
 		C.ungrab_keyboard(b.xdisplay)
-		C.ungrab_pointer(b.xdisplay)
 		b.setAtom("STEAM_INPUT_FOCUS", false)
 		b.setCardinal("_NET_WM_WINDOW_OPACITY", 0)
 		slog.Debug("gamescope: overlay hidden")

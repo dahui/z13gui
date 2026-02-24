@@ -12,6 +12,21 @@ import (
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
+// addTouchActivate works around a GTK4 X11 issue where CheckButton and Switch
+// widgets don't receive touch events properly in gamescope/XWayland (their
+// internal GestureClick uses BUBBLE phase, which fails for touch). Adding a
+// CAPTURE-phase, touch-only gesture ensures touch taps activate these widgets.
+// Mouse input is unaffected (SetTouchOnly).
+func addTouchActivate(widget gtk.Widgetter, onTap func()) {
+	gesture := gtk.NewGestureClick()
+	gesture.SetTouchOnly(true)
+	gesture.SetPropagationPhase(gtk.PhaseCapture)
+	gesture.ConnectReleased(func(nPress int, x, y float64) {
+		onTap()
+	})
+	gtk.BaseWidget(widget).AddController(gesture)
+}
+
 // buildContent builds the scrolled content box and returns it as the window child.
 // In gamescope mode the scrolled content, theme view, and color picker view are
 // wrapped in a gtk.Stack so views can be swapped without using popovers (which
@@ -150,6 +165,9 @@ func (w *Window) buildToggle(label, tooltip string, sw **gtk.Switch, onChange fu
 		}
 		return false
 	})
+	if w.gamescope {
+		addTouchActivate(s, func() { s.SetActive(!s.Active()) })
+	}
 	*sw = s
 	box.Append(lbl)
 	box.Append(s)
@@ -229,6 +247,9 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 				w.applyTheme(id, "")
 			}
 		})
+		if w.gamescope {
+			addTouchActivate(btn, func() { btn.SetActive(true) })
+		}
 		box.Append(btn)
 
 		// Accent dots — shown for themes that have accent variants.
@@ -284,6 +305,9 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 				w.applyCustomAccent("")
 			}
 		})
+		if w.gamescope {
+			addTouchActivate(customBtn, func() { customBtn.SetActive(true) })
+		}
 		box.Append(customBtn)
 
 		if len(w.customAccents) > 0 {
@@ -480,6 +504,11 @@ func (w *Window) buildTabRow() *gtk.Box {
 	w.tabKB = kb
 	w.tabLB = lb
 
+	if w.gamescope {
+		addTouchActivate(kb, func() { kb.SetActive(true) })
+		addTouchActivate(lb, func() { lb.SetActive(true) })
+	}
+
 	row.Append(kb)
 	row.Append(lb)
 	return row
@@ -517,6 +546,9 @@ func (w *Window) buildModeSection() *gtk.Box {
 				w.sendApply()
 			}
 		})
+		if w.gamescope {
+			addTouchActivate(btn, func() { btn.SetActive(true) })
+		}
 		w.modeButtons[mode] = btn
 		grid.Attach(btn, i%3, i/3, 1, 1)
 	}
@@ -546,6 +578,9 @@ func (w *Window) buildSpeedBox() *gtk.Box {
 				w.sendApply()
 			}
 		})
+		if w.gamescope {
+			addTouchActivate(btn, func() { btn.SetActive(true) })
+		}
 		w.speedBtns[sp] = btn
 		speedRow.Append(btn)
 	}
@@ -596,6 +631,9 @@ func (w *Window) buildProfileSection() *gtk.Box {
 				w.sendProfileSet(prof)
 			}
 		})
+		if w.gamescope {
+			addTouchActivate(btn, func() { btn.SetActive(true) })
+		}
 		w.profileBtns[prof] = btn
 		row.Append(btn)
 	}
