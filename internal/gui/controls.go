@@ -1,7 +1,8 @@
 package gui
 
-// controls.go — builds the entire drawer widget tree, theme picker, and
-// gamescope-specific view alternatives (theme view, HSL color picker view).
+// controls.go — builds the entire drawer widget tree, theme picker view,
+// and HSL color picker view. All views live in a gtk.Stack (both KDE and
+// gamescope modes) for consistent gamepad navigation.
 
 import (
 	"fmt"
@@ -28,9 +29,8 @@ func addTouchActivate(widget gtk.Widgetter, onTap func()) {
 }
 
 // buildContent builds the scrolled content box and returns it as the window child.
-// In gamescope mode the scrolled content, theme view, and color picker view are
-// wrapped in a gtk.Stack so views can be swapped without using popovers (which
-// create separate X11 windows that gamescope doesn't composite).
+// Content, theme view, and color picker view are in a gtk.Stack so views can be
+// swapped for gamepad navigation (and in gamescope where popovers don't work).
 func (w *Window) buildContent() gtk.Widgetter {
 	outer := gtk.NewBox(gtk.OrientationVertical, 0)
 	outer.AddCSSClass("drawer")
@@ -83,25 +83,27 @@ func (w *Window) buildContent() gtk.Widgetter {
 	scroll.SetVExpand(true)
 	scroll.SetChild(inner)
 
-	if w.gamescope {
-		w.viewStack = gtk.NewStack()
-		w.viewStack.SetTransitionType(gtk.StackTransitionTypeCrossfade)
-		w.viewStack.SetVExpand(true)
+	// Stack with main, theme, and color views — used in both modes.
+	w.viewStack = gtk.NewStack()
+	w.viewStack.SetTransitionType(gtk.StackTransitionTypeCrossfade)
+	w.viewStack.SetVExpand(true)
 
-		mainPage := gtk.NewBox(gtk.OrientationVertical, 0)
-		mainPage.Append(title)
-		mainPage.Append(scroll)
-		w.viewStack.AddNamed(mainPage, "main")
-		w.viewStack.AddNamed(w.buildThemeView(), "theme")
-		w.viewStack.AddNamed(w.buildColorPickerView(), "color")
-		w.viewStack.SetVisibleChildName("main")
-		outer.Append(w.viewStack)
-	} else {
-		outer.Append(title)
-		outer.Append(scroll)
-	}
+	mainPage := gtk.NewBox(gtk.OrientationVertical, 0)
+	mainPage.Append(title)
+	mainPage.Append(scroll)
+	w.viewStack.AddNamed(mainPage, "main")
+	w.viewStack.AddNamed(w.buildThemeView(), "theme")
+	w.viewStack.AddNamed(w.buildColorPickerView(), "color")
+	w.viewStack.SetVisibleChildName("main")
+	outer.Append(w.viewStack)
 
 	outer.Append(w.buildBottomBar())
+
+	w.buildMainFocusList()
+	w.buildThemeFocusList()
+	w.buildColorFocusList()
+	w.focusItems = w.mainFocusItems
+
 	return outer
 }
 
@@ -115,19 +117,11 @@ func (w *Window) buildBottomBar() *gtk.Box {
 	bar.SetMarginBottom(8)
 	bar.SetMarginStart(10)
 
-	if w.gamescope {
-		paletteBtn := gtk.NewButton()
-		paletteBtn.SetIconName("preferences-desktop-color-symbolic")
-		paletteBtn.SetTooltipText("Choose theme")
-		paletteBtn.ConnectClicked(func() { w.showThemeView() })
-		bar.Append(paletteBtn)
-	} else {
-		paletteBtn := gtk.NewMenuButton()
-		paletteBtn.SetIconName("preferences-desktop-color-symbolic")
-		paletteBtn.SetTooltipText("Choose theme")
-		paletteBtn.SetPopover(w.buildThemePopover())
-		bar.Append(paletteBtn)
-	}
+	w.paletteBtn = gtk.NewButton()
+	w.paletteBtn.SetIconName("preferences-desktop-color-symbolic")
+	w.paletteBtn.SetTooltipText("Choose theme")
+	w.paletteBtn.ConnectClicked(func() { w.showThemeView() })
+	bar.Append(w.paletteBtn)
 
 	// Spacer pushes toggles to the right.
 	spacer := gtk.NewBox(gtk.OrientationHorizontal, 0)
@@ -174,41 +168,24 @@ func (w *Window) buildToggle(label, tooltip string, sw **gtk.Switch, onChange fu
 	return box
 }
 
-// buildThemePopover builds the theme selection popover with accent color dots.
-// Used in KDE mode; in gamescope mode buildThemeView is used instead.
-func (w *Window) buildThemePopover() *gtk.Popover {
-	pop := gtk.NewPopover()
-	pop.AddCSSClass("z13-popover")
-	box := gtk.NewBox(gtk.OrientationVertical, 2)
-	box.SetMarginTop(6)
-	box.SetMarginBottom(6)
-	box.SetMarginStart(8)
-	box.SetMarginEnd(8)
-
-	// Popover title.
-	title := gtk.NewLabel("Theme")
-	title.SetXAlign(0)
-	title.AddCSSClass("section-label")
-	title.SetMarginBottom(4)
-	box.Append(title)
-
-	w.appendThemeChoices(box)
-
-	scroll := gtk.NewScrolledWindow()
-	scroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
-	scroll.SetMaxContentHeight(500)
-	scroll.SetPropagateNaturalHeight(true)
-	scroll.SetChild(box)
-	pop.SetChild(scroll)
-	return pop
-}
-
-// buildThemeView builds the theme picker as a full scrollable view for gamescope.
-// Used instead of the popover which creates a separate X11 window.
+// buildThemeView builds the theme picker as a full scrollable view.
 func (w *Window) buildThemeView() *gtk.Box {
 	view := gtk.NewBox(gtk.OrientationVertical, 0)
 
-	header := w.buildViewHeader("Theme", func() { w.showMainView() })
+	w.themeBackBtn = gtk.NewButton()
+	w.themeBackBtn.SetIconName("go-previous-symbolic")
+	w.themeBackBtn.AddCSSClass("view-back-btn")
+	w.themeBackBtn.ConnectClicked(func() { w.showMainView() })
+
+	header := gtk.NewBox(gtk.OrientationHorizontal, 8)
+	header.SetMarginTop(10)
+	header.SetMarginBottom(6)
+	header.SetMarginStart(14)
+	header.Append(w.themeBackBtn)
+	lbl := gtk.NewLabel("Theme")
+	lbl.SetHAlign(gtk.AlignStart)
+	lbl.AddCSSClass("drawer-title")
+	header.Append(lbl)
 	view.Append(header)
 
 	content := gtk.NewBox(gtk.OrientationVertical, 2)
@@ -227,8 +204,12 @@ func (w *Window) buildThemeView() *gtk.Box {
 }
 
 // appendThemeChoices appends the theme radio buttons and accent dots to box.
-// Shared between buildThemePopover (KDE) and buildThemeView (gamescope).
+// Also collects widget references in w.themeRadios and w.themeDots for
+// building the theme focus list.
 func (w *Window) appendThemeChoices(box *gtk.Box) {
+	w.themeRadios = nil
+	w.themeDots = nil
+
 	activeCfg := theme.LoadAppConfig()
 	var first *gtk.CheckButton
 	for _, t := range theme.Builtins {
@@ -250,9 +231,11 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 		if w.gamescope {
 			addTouchActivate(btn, func() { btn.SetActive(true) })
 		}
+		w.themeRadios = append(w.themeRadios, btn)
 		box.Append(btn)
 
 		// Accent dots — shown for themes that have accent variants.
+		var dots []*gtk.Button
 		if len(t.Accents) > 0 {
 			accentLabel := gtk.NewLabel("Accent Color")
 			accentLabel.SetXAlign(0)
@@ -287,10 +270,12 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 					btn.SetActive(true)
 					w.applyTheme(id, ac.ID)
 				})
+				dots = append(dots, dot)
 				row.Append(dot)
 			}
 			box.Append(dotsGrid)
 		}
+		w.themeDots = append(w.themeDots, dots)
 	}
 
 	// Custom theme entry — shown when theme.toml is active.
@@ -308,8 +293,10 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 		if w.gamescope {
 			addTouchActivate(customBtn, func() { customBtn.SetActive(true) })
 		}
+		w.themeRadios = append(w.themeRadios, customBtn)
 		box.Append(customBtn)
 
+		var dots []*gtk.Button
 		if len(w.customAccents) > 0 {
 			accentLabel := gtk.NewLabel("Accent Color")
 			accentLabel.SetXAlign(0)
@@ -343,14 +330,16 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 				dot.ConnectClicked(func() {
 					w.applyCustomAccent(ac.ID)
 				})
+				dots = append(dots, dot)
 				row.Append(dot)
 			}
 			box.Append(dotsGrid)
 		}
+		w.themeDots = append(w.themeDots, dots)
 	}
 }
 
-// buildColorPickerView builds the HSL color picker view for gamescope mode.
+// buildColorPickerView builds the HSL color picker view.
 // Contains preset buttons, hue/saturation/lightness sliders, and a preview swatch.
 func (w *Window) buildColorPickerView() *gtk.Box {
 	view := gtk.NewBox(gtk.OrientationVertical, 8)
@@ -359,9 +348,22 @@ func (w *Window) buildColorPickerView() *gtk.Box {
 
 	// Header: back button + dynamic title.
 	w.colorViewTitle = gtk.NewLabel("COLOR")
-	view.Append(w.buildColorViewHeader())
+	w.colorBackBtn = gtk.NewButton()
+	w.colorBackBtn.SetIconName("go-previous-symbolic")
+	w.colorBackBtn.AddCSSClass("view-back-btn")
+	w.colorBackBtn.ConnectClicked(func() { w.showMainView() })
+
+	header := gtk.NewBox(gtk.OrientationHorizontal, 8)
+	header.SetMarginTop(10)
+	header.SetMarginBottom(6)
+	header.Append(w.colorBackBtn)
+	w.colorViewTitle.SetHAlign(gtk.AlignStart)
+	w.colorViewTitle.AddCSSClass("drawer-title")
+	header.Append(w.colorViewTitle)
+	view.Append(header)
 
 	// 8 preset buttons.
+	w.colorPickerPresets = nil
 	presetsRow := gtk.NewBox(gtk.OrientationHorizontal, 4)
 	for _, hex := range presetColors {
 		h := hex
@@ -372,6 +374,7 @@ func (w *Window) buildColorPickerView() *gtk.Box {
 		p.LoadFromString(fmt.Sprintf("button.color-preset { background: #%s; }", h))
 		btn.StyleContext().AddProvider(p, gtk.STYLE_PROVIDER_PRIORITY_USER+5) //nolint:staticcheck // per-widget dynamic color
 		btn.ConnectClicked(func() { w.colorPickerPresetClicked(h) })
+		w.colorPickerPresets = append(w.colorPickerPresets, btn)
 		presetsRow.Append(btn)
 	}
 	view.Append(presetsRow)
@@ -408,28 +411,12 @@ func (w *Window) buildColorPickerView() *gtk.Box {
 	return view
 }
 
-// buildColorViewHeader builds the header for the color picker view with a back
-// button and the dynamic color title label.
-func (w *Window) buildColorViewHeader() *gtk.Box {
-	header := gtk.NewBox(gtk.OrientationHorizontal, 8)
-	header.SetMarginTop(10)
-	header.SetMarginBottom(6)
-	backBtn := gtk.NewButton()
-	backBtn.SetIconName("go-previous-symbolic")
-	backBtn.AddCSSClass("view-back-btn")
-	backBtn.ConnectClicked(func() { w.showMainView() })
-	header.Append(backBtn)
-	w.colorViewTitle.SetHAlign(gtk.AlignStart)
-	w.colorViewTitle.AddCSSClass("drawer-title")
-	header.Append(w.colorViewTitle)
-	return header
-}
-
 // buildHSLScale creates a Scale for an HSL component.
 func (w *Window) buildHSLScale(name string, min, max float64) *gtk.Scale {
 	sc := gtk.NewScaleWithRange(gtk.OrientationHorizontal, min, max, 1)
 	sc.SetDigits(0)
 	sc.SetDrawValue(true)
+	sc.SetFocusable(false)
 	sc.ConnectValueChanged(func() { w.onHSLChanged() })
 	return sc
 }
@@ -442,35 +429,19 @@ func hslScaleBox(label string, sc *gtk.Scale) *gtk.Box {
 	return box
 }
 
-// buildViewHeader builds a header bar with a back button and title label.
-func (w *Window) buildViewHeader(titleText string, onBack func()) *gtk.Box {
-	header := gtk.NewBox(gtk.OrientationHorizontal, 8)
-	header.SetMarginTop(10)
-	header.SetMarginBottom(6)
-	header.SetMarginStart(14)
-	backBtn := gtk.NewButton()
-	backBtn.SetIconName("go-previous-symbolic")
-	backBtn.AddCSSClass("view-back-btn")
-	backBtn.ConnectClicked(func() { onBack() })
-	header.Append(backBtn)
-	lbl := gtk.NewLabel(titleText)
-	lbl.SetHAlign(gtk.AlignStart)
-	lbl.AddCSSClass("drawer-title")
-	header.Append(lbl)
-	return header
-}
-
-// showMainView switches the gamescope view stack to the main drawer view.
+// showMainView switches the view stack to the main drawer view.
 func (w *Window) showMainView() {
 	if w.viewStack != nil {
 		w.viewStack.SetVisibleChildName("main")
+		w.swapFocusList(w.mainFocusItems)
 	}
 }
 
-// showThemeView switches the gamescope view stack to the theme picker view.
+// showThemeView switches the view stack to the theme picker view.
 func (w *Window) showThemeView() {
 	if w.viewStack != nil {
 		w.viewStack.SetVisibleChildName("theme")
+		w.swapFocusList(w.themeFocusItems)
 	}
 }
 
@@ -600,6 +571,7 @@ func (w *Window) buildBrightnessBox() *gtk.Box {
 	sc.SetDigits(0)
 	sc.SetDrawValue(true)
 	sc.SetValue(3)
+	sc.SetFocusable(false)
 	sc.ConnectValueChanged(func() {
 		w.queueApply()
 	})
@@ -651,6 +623,7 @@ func (w *Window) buildBatterySection() *gtk.Box {
 	sc.SetDigits(0)
 	sc.SetDrawValue(true)
 	sc.SetValue(80)
+	sc.SetFocusable(false)
 	w.battScale = sc
 	w.initBatteryDebounce(sc)
 
@@ -686,4 +659,219 @@ func groupLabel(text string) *gtk.Label {
 // separator creates a horizontal separator line.
 func separator() *gtk.Separator {
 	return gtk.NewSeparator(gtk.OrientationHorizontal)
+}
+
+// buildMainFocusList builds the 2D focus grid for the main drawer view.
+// Items are arranged by visual row/col matching the drawer layout.
+func (w *Window) buildMainFocusList() {
+	var items []focusItem
+	boxVisible := func(box *gtk.Box) func() bool {
+		return func() bool { return box.IsVisible() }
+	}
+
+	// Profiles — stacked vertically, one per row.
+	for i, p := range profiles {
+		btn := w.profileBtns[p]
+		items = append(items, focusItem{
+			widget: btn, row: i, col: 0,
+			section:    "profile",
+			onActivate: func() { btn.SetActive(true) },
+		})
+	}
+
+	// Battery slider.
+	battLeft, battRight, battGet, battSet := scaleAdjust(w.battScale, 5)
+	items = append(items, focusItem{
+		widget: w.battScale, row: 3, col: 0,
+		section:  "battery",
+		editable: true,
+		onLeft:   battLeft, onRight: battRight,
+		getValue: battGet, setValue: battSet,
+	})
+
+	// Device tabs — horizontal row.
+	for col, btn := range []*gtk.CheckButton{w.tabKB, w.tabLB} {
+		btn := btn
+		items = append(items, focusItem{
+			widget: btn, row: 4, col: col,
+			section:    "tabs",
+			onActivate: func() { btn.SetActive(true) },
+		})
+	}
+
+	// Mode buttons — 3x2 grid.
+	for i, m := range modeOrder {
+		btn := w.modeButtons[m]
+		items = append(items, focusItem{
+			widget: btn, row: 5 + i/3, col: i % 3,
+			section:    "mode",
+			onActivate: func() { btn.SetActive(true) },
+		})
+	}
+
+	// Color 1 presets — horizontal row of 8 buttons.
+	if w.color1 != nil {
+		vis := boxVisible(w.color1Box)
+		for col, btn := range w.color1.presetBtns {
+			btn := btn
+			items = append(items, focusItem{
+				widget: btn, row: 7, col: col,
+				section: "color1", isVisible: vis,
+				onActivate: func() { btn.Activate() },
+			})
+		}
+		// Custom button on its own row below presets.
+		items = append(items, focusItem{
+			widget: w.color1.customBtn, row: 8, col: 0,
+			section: "color1", isVisible: vis,
+			onActivate: func() { w.showColorView(w.color1) },
+		})
+	}
+
+	// Color 2 presets.
+	if w.color2 != nil {
+		vis := boxVisible(w.color2Box)
+		for col, btn := range w.color2.presetBtns {
+			btn := btn
+			items = append(items, focusItem{
+				widget: btn, row: 9, col: col,
+				section: "color2", isVisible: vis,
+				onActivate: func() { btn.Activate() },
+			})
+		}
+		items = append(items, focusItem{
+			widget: w.color2.customBtn, row: 10, col: 0,
+			section: "color2", isVisible: vis,
+			onActivate: func() { w.showColorView(w.color2) },
+		})
+	}
+
+	// Speed buttons — horizontal row.
+	speedOrder := []string{"slow", "normal", "fast"}
+	for col, s := range speedOrder {
+		btn := w.speedBtns[s]
+		items = append(items, focusItem{
+			widget: btn, row: 11, col: col,
+			section: "speed", isVisible: boxVisible(w.speedBox),
+			onActivate: func() { btn.SetActive(true) },
+		})
+	}
+
+	// Brightness slider.
+	brLeft, brRight, brGet, brSet := scaleAdjust(w.brightScale, 1)
+	items = append(items, focusItem{
+		widget: w.brightScale, row: 12, col: 0,
+		section: "brightness", isVisible: boxVisible(w.brightBox),
+		editable: true,
+		onLeft:   brLeft, onRight: brRight,
+		getValue: brGet, setValue: brSet,
+	})
+
+	// Footer: theme button, overdrive, boot sound.
+	col := 0
+	items = append(items, focusItem{
+		widget: w.paletteBtn, row: 13, col: col,
+		section:    "footer",
+		onActivate: func() { w.showThemeView() },
+	})
+	col++
+	if w.overdriveSwitch != nil {
+		sw := w.overdriveSwitch
+		items = append(items, focusItem{
+			widget: sw, row: 13, col: col,
+			section:    "footer",
+			onActivate: func() { sw.SetActive(!sw.Active()) },
+		})
+		col++
+	}
+	if w.bootSoundSwitch != nil {
+		sw := w.bootSoundSwitch
+		items = append(items, focusItem{
+			widget: sw, row: 13, col: col,
+			section:    "footer",
+			onActivate: func() { sw.SetActive(!sw.Active()) },
+		})
+	}
+
+	w.mainFocusItems = items
+}
+
+// buildThemeFocusList builds the 2D focus grid for the theme picker view.
+// Must be called after appendThemeChoices has populated w.themeRadios/w.themeDots.
+func (w *Window) buildThemeFocusList() {
+	var items []focusItem
+	const dotsPerRow = 7
+
+	// Row 0: back button.
+	if w.themeBackBtn != nil {
+		items = append(items, focusItem{
+			widget: w.themeBackBtn, row: 0, col: 0,
+			section:    "nav",
+			onActivate: func() { w.showMainView() },
+		})
+	}
+
+	row := 1
+	for i, btn := range w.themeRadios {
+		btn := btn
+		items = append(items, focusItem{
+			widget: btn, row: row, col: 0,
+			section:    "theme",
+			onActivate: func() { btn.SetActive(true) },
+		})
+		row++
+
+		// Accent dots for this theme.
+		if i < len(w.themeDots) && len(w.themeDots[i]) > 0 {
+			for j, dot := range w.themeDots[i] {
+				dot := dot
+				items = append(items, focusItem{
+					widget: dot, row: row + j/dotsPerRow, col: j % dotsPerRow,
+					section:    "theme",
+					onActivate: func() { dot.Activate() },
+				})
+			}
+			row += (len(w.themeDots[i])-1)/dotsPerRow + 1
+		}
+	}
+
+	w.themeFocusItems = items
+}
+
+// buildColorFocusList builds the 2D focus grid for the HSL color picker view.
+func (w *Window) buildColorFocusList() {
+	var items []focusItem
+
+	// Row 0: back button.
+	if w.colorBackBtn != nil {
+		items = append(items, focusItem{
+			widget: w.colorBackBtn, row: 0, col: 0,
+			section:    "nav",
+			onActivate: func() { w.showMainView() },
+		})
+	}
+
+	// Row 1: color presets.
+	for col, btn := range w.colorPickerPresets {
+		btn := btn
+		items = append(items, focusItem{
+			widget: btn, row: 1, col: col,
+			section:    "presets",
+			onActivate: func() { btn.Activate() },
+		})
+	}
+
+	// Rows 2-4: HSL sliders (editable).
+	for i, sc := range []*gtk.Scale{w.colorHue, w.colorSat, w.colorLit} {
+		oL, oR, gV, sV := scaleAdjust(sc, 5)
+		items = append(items, focusItem{
+			widget: sc, row: 2 + i, col: 0,
+			section:  "sliders",
+			editable: true,
+			onLeft:   oL, onRight: oR,
+			getValue: gV, setValue: sV,
+		})
+	}
+
+	w.colorFocusItems = items
 }

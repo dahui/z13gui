@@ -1,16 +1,14 @@
 package gui
 
-// color.go — color input widget: swatch + preset buttons + custom color chooser popover.
-// In gamescope mode, the custom button navigates to an HSL color picker view
-// instead of opening a popover (GTK4 popovers create separate X11 windows that
-// gamescope doesn't composite).
+// color.go — color input widget: swatch + preset buttons + custom button.
+// The Custom button navigates to the HSL color picker view (stack-based,
+// works in both KDE and gamescope modes).
 
 import (
 	"fmt"
 	"math"
 	"strings"
 
-	"github.com/diamondburned/gotk4/pkg/gdk/v4"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
@@ -26,29 +24,19 @@ var presetColors = []string{
 	"FFFFFF", // white
 }
 
-// colorInput holds the current-color swatch, a row of preset buttons, a
-// "Custom" MenuButton, and the ColorChooserWidget inside its popover.
+// colorInput holds the current-color swatch, preset buttons, and a Custom
+// button that navigates to the HSL color picker view.
 type colorInput struct {
-	row     *gtk.Box
-	swatch  *gtk.Box                // current-color square (CSS ID driven)
-	chooser *gtk.ColorChooserWidget //nolint:staticcheck // ColorDialog requires a portal; unusable on Wayland
-	hex     string                  // current RRGGBB uppercase
-	label   string                  // display label ("COLOR 1" / "COLOR 2")
-}
-
-// SetHex updates the stored color and pushes it to the chooser (if present).
-// Must only be called while w.syncing == true so the notify::rgba handler
-// that fires from SetRGBA does not trigger a spurious sendApply.
-func (ci *colorInput) SetHex(hex string) {
-	ci.hex = strings.ToUpper(hex)
-	if ci.chooser != nil {
-		ci.chooser.SetRGBA(hexToRGBA(ci.hex)) //nolint:staticcheck // see colorInput.chooser
-	}
+	row        *gtk.Box      // entire color input container
+	swatch     *gtk.Box      // current-color square (CSS ID driven)
+	presetBtns []*gtk.Button // individual preset color buttons
+	customBtn  *gtk.Button   // "Custom" button (navigates to color view)
+	hex        string        // current RRGGBB uppercase
+	label      string        // display label ("COLOR 1" / "COLOR 2")
 }
 
 // newColorInput creates a color input widget with swatch, preset buttons,
-// and a Custom button that opens a ColorChooserWidget in a popover.
-// In gamescope mode the Custom button navigates to the HSL color picker view.
+// and a Custom button that navigates to the HSL color picker view.
 func (w *Window) newColorInput(initialHex, swatchName, label string) *colorInput {
 	ci := &colorInput{hex: strings.ToUpper(initialHex), label: label}
 
@@ -57,17 +45,7 @@ func (w *Window) newColorInput(initialHex, swatchName, label string) *colorInput
 	ci.swatch.SetName(swatchName)
 	ci.swatch.AddCSSClass("color-swatch")
 
-	if !w.gamescope {
-		// Color chooser widget lives inside a popover on the Custom button.
-		// ColorChooserWidget is deprecated upstream but ColorDialog requires an
-		// XDG portal that doesn't work correctly on Wayland compositors (KDE/Hyprland).
-		ci.chooser = gtk.NewColorChooserWidget() //nolint:staticcheck // see block comment above
-		ci.chooser.SetUseAlpha(false)            //nolint:staticcheck // see block comment above
-		ci.chooser.SetSizeRequest(260, 320)
-		ci.chooser.SetRGBA(hexToRGBA(ci.hex)) //nolint:staticcheck // see block comment above
-	}
-
-	// Row 1: preset buttons, each expanding equally to fill the row width.
+	// Preset buttons, each expanding equally to fill the row width.
 	presetsRow := gtk.NewBox(gtk.OrientationHorizontal, 4)
 	for _, hex := range presetColors {
 		h := hex
@@ -81,56 +59,23 @@ func (w *Window) newColorInput(initialHex, swatchName, label string) *colorInput
 			ci.hex = h
 			w.updateSwatches()
 			w.sendApply()
-			if ci.chooser != nil {
-				w.syncing = true
-				ci.chooser.SetRGBA(hexToRGBA(h)) //nolint:staticcheck // see colorInput.chooser
-				w.syncing = false
-			}
 		})
+		ci.presetBtns = append(ci.presetBtns, btn)
 		presetsRow.Append(btn)
 	}
 
 	ci.row = gtk.NewBox(gtk.OrientationVertical, 4)
 	ci.row.Append(presetsRow)
 
-	if w.gamescope {
-		// Navigate to the HSL color picker view instead of opening a popover.
-		editBtn := gtk.NewButton()
-		editBtn.SetLabel("Custom")
-		editBtn.SetHExpand(true)
-		editBtn.ConnectClicked(func() { w.showColorView(ci) })
-		controlsRow := gtk.NewBox(gtk.OrientationHorizontal, 8)
-		controlsRow.Append(ci.swatch)
-		controlsRow.Append(editBtn)
-		ci.row.Append(controlsRow)
-	} else {
-		popover := gtk.NewPopover()
-		popover.AddCSSClass("z13-popover")
-		popover.SetChild(ci.chooser)
-		popover.SetHasArrow(false)
-
-		customBtn := gtk.NewMenuButton()
-		customBtn.SetLabel("Custom")
-		customBtn.SetPopover(popover)
-
-		// Connect AFTER SetRGBA so the initial set doesn't fire the handler.
-		ci.chooser.NotifyProperty("rgba", func() {
-			if w.syncing {
-				return
-			}
-			rgba := ci.chooser.RGBA() //nolint:staticcheck // see colorInput.chooser
-			ci.hex = rgbaToHex(rgba)
-			w.updateSwatches()
-			w.queueApply()
-		})
-
-		// Row 2: current-color swatch + Custom MenuButton.
-		customBtn.SetHExpand(true)
-		controlsRow := gtk.NewBox(gtk.OrientationHorizontal, 8)
-		controlsRow.Append(ci.swatch)
-		controlsRow.Append(customBtn)
-		ci.row.Append(controlsRow)
-	}
+	// Custom button navigates to the HSL color picker view.
+	ci.customBtn = gtk.NewButton()
+	ci.customBtn.SetLabel("Custom")
+	ci.customBtn.SetHExpand(true)
+	ci.customBtn.ConnectClicked(func() { w.showColorView(ci) })
+	controlsRow := gtk.NewBox(gtk.OrientationHorizontal, 8)
+	controlsRow.Append(ci.swatch)
+	controlsRow.Append(ci.customBtn)
+	ci.row.Append(controlsRow)
 
 	return ci
 }
@@ -155,7 +100,7 @@ func (w *Window) updateSwatches() {
 	))
 }
 
-// showColorView navigates the gamescope view stack to the HSL color picker
+// showColorView navigates the view stack to the HSL color picker
 // and initializes the sliders from the given colorInput's current hex.
 func (w *Window) showColorView(ci *colorInput) {
 	if w.viewStack == nil {
@@ -171,6 +116,7 @@ func (w *Window) showColorView(ci *colorInput) {
 	w.syncing = false
 	w.updateColorPreview()
 	w.viewStack.SetVisibleChildName("color")
+	w.swapFocusList(w.colorFocusItems)
 }
 
 // onHSLChanged reads the current HSL slider values, converts to hex, and
@@ -219,26 +165,6 @@ func (w *Window) updateColorPreview() {
 	if w.colorHexLabel != nil {
 		w.colorHexLabel.SetLabel("#" + hex)
 	}
-}
-
-// hexToRGBA converts a 6-digit uppercase hex string (e.g. "FF0000") to a gdk.RGBA.
-func hexToRGBA(hex string) *gdk.RGBA {
-	var ri, gi, bi uint8
-	_, _ = fmt.Sscanf(hex, "%02X%02X%02X", &ri, &gi, &bi)
-	rgba := gdk.NewRGBA(float32(ri)/255, float32(gi)/255, float32(bi)/255, 1.0)
-	return &rgba
-}
-
-// rgbaToHex converts a gdk.RGBA to a 6-digit uppercase hex string (e.g. "FF0000").
-// Returns "FF0000" (red) if rgba is nil.
-func rgbaToHex(rgba *gdk.RGBA) string {
-	if rgba == nil {
-		return "FF0000"
-	}
-	r := int(math.Round(float64(rgba.Red()) * 255))
-	g := int(math.Round(float64(rgba.Green()) * 255))
-	b := int(math.Round(float64(rgba.Blue()) * 255))
-	return fmt.Sprintf("%02X%02X%02X", r, g, b)
 }
 
 // hexToHSL converts a 6-digit hex string (e.g. "FF6600") to HSL components.

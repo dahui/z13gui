@@ -184,3 +184,13 @@ popover.z13-popover .accent-label {
 .bottom-bar switch:checked {
     background: @z13-accent;
 }
+
+/* Gamepad focus indicator */
+.gamepad-focus {
+    outline-color: @z13-accent;
+}
+
+/* Gamepad editing indicator (slider adjust mode) */
+.gamepad-editing {
+    outline-color: @z13-accent;
+}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/dahui/z13ctl/api"
 	"github.com/dahui/z13gui/internal/gui/fonts"
+	"github.com/dahui/z13gui/internal/gui/gamepad"
 	"github.com/dahui/z13gui/internal/gui/gamescope"
 	"github.com/dahui/z13gui/internal/gui/layershell"
 	"github.com/dahui/z13gui/internal/theme"
@@ -66,21 +67,38 @@ type Window struct {
 	syncing    bool        // true while syncState is updating widgets; suppresses sendApply
 	applyTimer *time.Timer // debounce for continuous inputs (brightness, color wheel)
 
-	// Gamescope view switching (nil in KDE mode).
-	viewStack       *gtk.Stack       // switches between main/theme/color views
-	editingColor    *colorInput      // which color the color-picker view is editing
-	colorViewTitle  *gtk.Label       // "COLOR 1" or "COLOR 2" in color view header
-	colorHue        *gtk.Scale       // H: 0-360
-	colorSat        *gtk.Scale       // S: 0-100
-	colorLit        *gtk.Scale       // L: 0-100
-	colorPreview    *gtk.Box         // swatch preview in color view
-	colorHexLabel   *gtk.Label       // hex display in color view
-	colorSwatchProv *gtk.CSSProvider // color picker preview swatch CSS
+	// View switching (main/theme/color views).
+	viewStack          *gtk.Stack       // switches between main/theme/color views
+	editingColor       *colorInput      // which color the color-picker view is editing
+	colorViewTitle     *gtk.Label       // "COLOR 1" or "COLOR 2" in color view header
+	colorHue           *gtk.Scale       // H: 0-360
+	colorSat           *gtk.Scale       // S: 0-100
+	colorLit           *gtk.Scale       // L: 0-100
+	colorPreview       *gtk.Box         // swatch preview in color view
+	colorHexLabel      *gtk.Label       // hex display in color view
+	colorSwatchProv    *gtk.CSSProvider // color picker preview swatch CSS
+	paletteBtn         *gtk.Button      // theme button in bottom bar
+	themeBackBtn       *gtk.Button      // back button in theme view
+	colorBackBtn       *gtk.Button      // back button in color picker view
+	colorPickerPresets []*gtk.Button    // preset buttons in color picker view
+	themeRadios        []*gtk.CheckButton // collected during appendThemeChoices
+	themeDots          [][]*gtk.Button    // accent dot buttons per theme
 
 	// Custom theme state (set when theme.toml exists).
 	isCustomTheme bool
 	customColors  theme.Colors
 	customAccents []theme.Accent
+
+	// Gamepad focus navigation.
+	gamepadReader     *gamepad.Reader
+	focusItems        []focusItem // active view's navigable widgets (points to one of the lists below)
+	focusIdx          int         // current position in focusItems
+	gamepadActive     bool        // true when gamepad focus indicator is shown
+	focusEditing      bool        // true when a slider is in edit mode
+	editOriginalValue float64     // saved value for cancel on B
+	mainFocusItems    []focusItem // focus grid for main drawer view
+	themeFocusItems   []focusItem // focus grid for theme picker view
+	colorFocusItems   []focusItem // focus grid for HSL color picker view
 }
 
 // New creates the overlay window and attaches it to app. Called from the
@@ -123,6 +141,39 @@ func New(app *gtk.Application) *Window {
 	w.syncing = false
 
 	go w.subscribeLoop()
+
+	// Gamepad input (disabled with Z13GUI_NO_GAMEPAD=1).
+	if os.Getenv("Z13GUI_NO_GAMEPAD") == "" {
+		w.gamepadReader = gamepad.New(
+			w.handleGamepadAction,
+			func() bool { return w.visible },
+			func(f func()) { glib.IdleAdd(f) },
+		)
+		go w.gamepadReader.Run()
+	}
+
+	// Hide gamepad focus indicator on mouse movement.
+	motion := gtk.NewEventControllerMotion()
+	motion.ConnectMotion(func(x, y float64) {
+		if w.gamepadActive {
+			w.hideGamepadFocus()
+		}
+	})
+	w.gtkWin.AddController(motion)
+
+	// Block arrow keys from reaching child widgets. GTK4 uses arrow keys
+	// to navigate radio groups (auto-activating them) and adjust scales.
+	// The overlay uses mouse/touch/gamepad — not keyboard navigation.
+	keyBlock := gtk.NewEventControllerKey()
+	keyBlock.SetPropagationPhase(gtk.PhaseCapture)
+	keyBlock.ConnectKeyPressed(func(keyval, keycode uint, state gdk.ModifierType) bool {
+		switch keyval {
+		case gdk.KEY_Up, gdk.KEY_Down, gdk.KEY_Left, gdk.KEY_Right:
+			return true
+		}
+		return false
+	})
+	w.gtkWin.AddController(keyBlock)
 
 	slog.Info("drawer initialized")
 	return w
@@ -168,8 +219,67 @@ func (w *Window) hide() {
 	w.visible = false
 	if w.viewStack != nil {
 		w.viewStack.SetVisibleChildName("main")
+		w.swapFocusList(w.mainFocusItems)
 	}
 	w.backend.Hide()
+}
+
+// handleGamepadAction processes a gamepad action on the GTK main thread.
+// Navigation: D-pad moves between items. A activates buttons/switches or
+// enters edit mode for sliders. In edit mode, left/right adjusts the value,
+// A commits, B cancels.
+func (w *Window) handleGamepadAction(action gamepad.Action) {
+	if !w.gamepadActive {
+		w.showGamepadFocus()
+	}
+	switch action {
+	case gamepad.ActionUp:
+		if w.focusEditing {
+			w.exitEditMode(true)
+		}
+		w.moveVertical(-1)
+	case gamepad.ActionDown:
+		if w.focusEditing {
+			w.exitEditMode(true)
+		}
+		w.moveVertical(1)
+	case gamepad.ActionLeft:
+		if w.focusEditing {
+			w.adjustFocus(-1)
+		} else {
+			w.moveHorizontal(-1)
+		}
+	case gamepad.ActionRight:
+		if w.focusEditing {
+			w.adjustFocus(1)
+		} else {
+			w.moveHorizontal(1)
+		}
+	case gamepad.ActionAccept:
+		if w.focusEditing {
+			w.exitEditMode(true)
+		} else {
+			w.activateOrEdit()
+		}
+	case gamepad.ActionBack:
+		if w.focusEditing {
+			w.exitEditMode(false)
+		} else if w.viewStack != nil && w.viewStack.VisibleChildName() != "main" {
+			w.showMainView()
+		} else {
+			w.hide()
+		}
+	case gamepad.ActionBumpL:
+		if w.focusEditing {
+			w.exitEditMode(true)
+		}
+		w.jumpSection(-1)
+	case gamepad.ActionBumpR:
+		if w.focusEditing {
+			w.exitEditMode(true)
+		}
+		w.jumpSection(1)
+	}
 }
 
 // subscribeLoop runs in a background goroutine. It subscribes to daemon events

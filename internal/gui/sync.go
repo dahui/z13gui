@@ -4,6 +4,7 @@ package gui
 
 import (
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/dahui/z13ctl/api"
@@ -86,10 +87,10 @@ func (w *Window) syncLightingSection() {
 		btn.SetActive(true)
 	}
 	if w.color1 != nil && ls.Color != "" {
-		w.color1.SetHex(ls.Color)
+		w.color1.hex = strings.ToUpper(ls.Color)
 	}
 	if w.color2 != nil && ls.Color2 != "" {
-		w.color2.SetHex(ls.Color2)
+		w.color2.hex = strings.ToUpper(ls.Color2)
 	}
 	w.updateSwatches()
 	if btn, ok := w.speedBtns[ls.Speed]; ok {

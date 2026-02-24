@@ -279,7 +279,9 @@ func (b *Backend) scaledCSS() string {
 .bottom-bar .toggle-label { font-size: %.0fpx; letter-spacing: %.1fpx; }
 .bottom-bar switch { min-height: %.0fpx; min-width: %.0fpx; border-radius: %.0fpx; }
 .bottom-bar switch slider { min-width: %.0fpx; min-height: %.0fpx; border-radius: %.0fpx; }
-.view-back-btn { min-width: %.0fpx; min-height: %.0fpx; padding: %.0fpx; }`,
+.view-back-btn { min-width: %.0fpx; min-height: %.0fpx; padding: %.0fpx; }
+.gamepad-focus { outline-width: %.0fpx; outline-offset: %.0fpx; }
+.gamepad-editing { outline-width: %.0fpx; outline-offset: %.0fpx; }`,
 		s,
 		14*s,                     // .drawer font-size
 		48*s, 4*s, 10*s, 6*s,    // checkbutton
@@ -299,5 +301,7 @@ func (b *Backend) scaledCSS() string {
 		20*s, 36*s, 10*s,         // bottom-bar switch (height, width, border-radius)
 		16*s, 16*s, 8*s,          // switch slider (width, height, border-radius)
 		32*s, 32*s, 4*s,          // view-back-btn
+		2*s, 2*s,                 // gamepad-focus (outline-width, outline-offset)
+		2*s, 2*s,                 // gamepad-editing (outline-width, outline-offset)
 	)
 }

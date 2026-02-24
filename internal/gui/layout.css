@@ -116,6 +116,20 @@ popover.z13-popover scrolledwindow {
     background: transparent;
 }
 
+/* Gamepad focus indicator — outline on the currently focused widget */
+.gamepad-focus {
+    outline-width: 2px;
+    outline-style: solid;
+    outline-offset: 2px;
+}
+
+/* Gamepad editing indicator — dashed outline when adjusting a slider */
+.gamepad-editing {
+    outline-width: 2px;
+    outline-style: dashed;
+    outline-offset: 2px;
+}
+
 /* Gamescope overlay — fullscreen transparent wrapper with scrim backdrop */
 .gs-wrapper {
     background: transparent;
