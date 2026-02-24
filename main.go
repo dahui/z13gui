@@ -57,6 +57,12 @@ func main() {
 
 	slog.Info("starting", "version", Version)
 
+	// Disable GTK4 accessibility bridge (AT-SPI). z13gui is a hardware overlay
+	// controlled by a physical button — no accessibility consumers. Without this,
+	// GTK4 sends D-Bus events on every widget state change, which can timeout
+	// under systemd where the AT-SPI bus may not be available.
+	_ = os.Setenv("GTK_A11Y", "none")
+
 	// Gamescope advertises Wayland layer-shell but doesn't implement
 	// anchoring/margins. Force GTK4 to use X11 so we can set gamescope
 	// overlay atoms instead. Must be set before GDK initialization.

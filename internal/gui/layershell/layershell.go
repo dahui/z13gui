@@ -23,10 +23,11 @@ type Backend struct {
 	appWin *gtk.ApplicationWindow
 	gtkWin *gtk.Window
 
-	drawerWidth  int
-	hiddenMargin int
-	margin       int    // current right margin: 0=on-screen, hiddenMargin=off-screen
-	animGen      uint64 // incremented to cancel in-flight animations
+	drawerWidth   int
+	hiddenMargin  int
+	margin        int    // current right margin: 0=on-screen, hiddenMargin=off-screen
+	animGen       uint64 // incremented to cancel in-flight animations
+	pointerInside bool   // true when pointer is over the drawer surface
 }
 
 // New creates a layer-shell backend. drawerWidth is the drawer panel width in pixels.
@@ -76,34 +77,55 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 	// This prevents KDE Plasma ghost-surface artifact on remap.
 	b.appWin.SetVisible(true)
 
-	// Hide when the window loses focus, but delay to allow child popovers
-	// (e.g. color picker) to become the active window first.
+	// Track pointer position to distinguish spurious KDE focus drops from
+	// genuine click-outside. When KDE drops focus after rapid keyboard-mode
+	// transitions, the pointer is still inside the drawer. When the user
+	// clicks outside, the pointer is outside.
+	motion := gtk.NewEventControllerMotion()
+	motion.ConnectEnter(func(x, y float64) {
+		b.pointerInside = true
+	})
+	motion.ConnectLeave(func() {
+		b.pointerInside = false
+	})
+	b.gtkWin.AddController(motion)
+
+	// Hide when the window loses focus, but only if the pointer is outside
+	// the drawer (genuine click-outside). Ignore focus drops when the pointer
+	// is inside (spurious KDE Plasma focus revocation).
 	b.appWin.Connect("notify::is-active", func() {
 		active := b.appWin.IsActive()
 		vis := isVisible()
-		slog.Debug("focus changed", "is-active", active, "visible", vis)
+		slog.Debug("focus changed", "is-active", active, "visible", vis, "pointerInside", b.pointerInside)
 		if active || !vis {
 			return
 		}
-		slog.Debug("focus lost while visible, starting 50ms timer")
-		glib.TimeoutAdd(50, func() bool {
-			vis2 := isVisible()
-			active2 := b.appWin.IsActive()
-			slog.Debug("focus-loss timer fired", "visible", vis2, "is-active", active2)
-			if !vis2 || active2 {
-				slog.Debug("focus-loss timer: skipped (not visible or refocused)")
+		if b.pointerInside {
+			slog.Debug("focus lost but pointer inside drawer, ignoring spurious drop")
+			return
+		}
+		slog.Debug("focus lost with pointer outside, dismissing after delay")
+		glib.TimeoutAdd(200, func() bool {
+			if !isVisible() || b.appWin.IsActive() {
+				slog.Debug("dismiss cancelled: hidden or refocused")
 				return false
 			}
-			activeWin := b.appWin.Application().ActiveWindow()
-			if activeWin != nil && activeWin.Object.Native() != b.gtkWin.Object.Native() {
-				slog.Debug("focus-loss timer: skipped (another app window active)")
-				return false
-			}
-			slog.Debug("focus-loss timer: calling onDismiss")
+			slog.Debug("dismiss confirmed: focus still lost")
 			onDismiss()
 			return false
 		})
 	})
+
+	// Escape key dismiss (matches gamescope backend).
+	key := gtk.NewEventControllerKey()
+	key.ConnectKeyPressed(func(keyval, keycode uint, state gdk.ModifierType) bool {
+		if keyval == 0xff1b { // GDK_KEY_Escape
+			onDismiss()
+			return true
+		}
+		return false
+	})
+	b.gtkWin.AddController(key)
 
 	slog.Info("backend", "mode", "layer-shell")
 }
