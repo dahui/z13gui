@@ -443,6 +443,10 @@ func (w *Window) showThemeView() {
 	if w.viewStack == nil {
 		return
 	}
+	if w.viewStack.VisibleChildName() == "theme" {
+		w.showMainView()
+		return
+	}
 	if w.themeScroll == nil {
 		w.viewStack.AddNamed(w.buildThemeView(), "theme")
 		w.buildThemeFocusList()
