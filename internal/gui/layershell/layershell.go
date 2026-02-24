@@ -79,17 +79,27 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 	// Hide when the window loses focus, but delay to allow child popovers
 	// (e.g. color picker) to become the active window first.
 	b.appWin.Connect("notify::is-active", func() {
-		if b.appWin.IsActive() || !isVisible() {
+		active := b.appWin.IsActive()
+		vis := isVisible()
+		slog.Debug("focus changed", "is-active", active, "visible", vis)
+		if active || !vis {
 			return
 		}
+		slog.Debug("focus lost while visible, starting 50ms timer")
 		glib.TimeoutAdd(50, func() bool {
-			if !isVisible() || b.appWin.IsActive() {
+			vis2 := isVisible()
+			active2 := b.appWin.IsActive()
+			slog.Debug("focus-loss timer fired", "visible", vis2, "is-active", active2)
+			if !vis2 || active2 {
+				slog.Debug("focus-loss timer: skipped (not visible or refocused)")
 				return false
 			}
-			active := b.appWin.Application().ActiveWindow()
-			if active != nil && active.Object.Native() != b.gtkWin.Object.Native() {
+			activeWin := b.appWin.Application().ActiveWindow()
+			if activeWin != nil && activeWin.Object.Native() != b.gtkWin.Object.Native() {
+				slog.Debug("focus-loss timer: skipped (another app window active)")
 				return false
 			}
+			slog.Debug("focus-loss timer: calling onDismiss")
 			onDismiss()
 			return false
 		})
@@ -106,6 +116,7 @@ func (b *Backend) WrapContent(drawer gtk.Widgetter) gtk.Widgetter {
 
 // Show starts the slide-in animation using a smoothstep easing curve.
 func (b *Backend) Show() {
+	slog.Debug("backend.Show", "startMargin", b.margin, "gen", b.animGen+1)
 	gtk4layershell.SetKeyboardMode(b.gtkWin, gtk4layershell.LayerShellKeyboardModeOnDemand)
 
 	b.animGen++
@@ -115,12 +126,14 @@ func (b *Backend) Show() {
 
 	glib.TimeoutAdd(16, func() bool {
 		if b.animGen != gen {
+			slog.Debug("show anim cancelled", "gen", gen, "currentGen", b.animGen)
 			return false
 		}
 		t := float64(time.Since(startTime)) / float64(animDuration)
 		if t >= 1.0 {
 			b.margin = 0
 			gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeRight, 0)
+			slog.Debug("show anim complete", "gen", gen)
 			return false
 		}
 		t = t * t * (3 - 2*t) // smoothstep
@@ -133,6 +146,7 @@ func (b *Backend) Show() {
 
 // Hide starts the slide-out animation.
 func (b *Backend) Hide() {
+	slog.Debug("backend.Hide", "startMargin", b.margin, "gen", b.animGen+1)
 	gtk4layershell.SetKeyboardMode(b.gtkWin, gtk4layershell.LayerShellKeyboardModeNone)
 
 	b.animGen++
@@ -142,12 +156,14 @@ func (b *Backend) Hide() {
 
 	glib.TimeoutAdd(16, func() bool {
 		if b.animGen != gen {
+			slog.Debug("hide anim cancelled", "gen", gen, "currentGen", b.animGen)
 			return false
 		}
 		t := float64(time.Since(startTime)) / float64(animDuration)
 		if t >= 1.0 {
 			b.margin = b.hiddenMargin
 			gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeRight, b.hiddenMargin)
+			slog.Debug("hide anim complete", "gen", gen)
 			return false
 		}
 		t = t * t * (3 - 2*t) // smoothstep

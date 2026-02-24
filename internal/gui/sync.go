@@ -179,16 +179,23 @@ func (w *Window) sendApply() {
 		brightness = 0
 	}
 
-	slog.Debug("apply", "device", w.tab, "mode", mode, "brightness", brightness)
+	slog.Debug("sendApply: calling daemon", "device", w.tab, "mode", mode, "brightness", brightness)
+	start := time.Now()
 	if _, err := api.SendApply(w.tab, color1, color2, mode, speed, brightness); err != nil {
-		slog.Warn("apply failed", "err", err)
+		slog.Warn("apply failed", "err", err, "elapsed", time.Since(start))
+	} else {
+		slog.Debug("sendApply: done", "elapsed", time.Since(start))
 	}
 }
 
 // sendProfileSet sends a profile change to the daemon.
 func (w *Window) sendProfileSet(prof string) {
+	slog.Debug("sendProfileSet: calling daemon", "profile", prof)
+	start := time.Now()
 	if _, err := api.SendProfileSet(prof); err != nil {
-		slog.Warn("profile set failed", "profile", prof, "err", err)
+		slog.Warn("profile set failed", "profile", prof, "err", err, "elapsed", time.Since(start))
+	} else {
+		slog.Debug("sendProfileSet: done", "elapsed", time.Since(start))
 	}
 }
 
@@ -201,8 +208,13 @@ func (w *Window) initBatteryDebounce(sc *gtk.Scale) {
 		}
 		debounce = time.AfterFunc(200*time.Millisecond, func() {
 			glib.IdleAdd(func() bool {
-				if _, err := api.SendBatteryLimitSet(int(sc.Value())); err != nil {
-					slog.Warn("battery limit set failed", "err", err)
+				val := int(sc.Value())
+				slog.Debug("sendBatteryLimitSet: calling daemon", "limit", val)
+				start := time.Now()
+				if _, err := api.SendBatteryLimitSet(val); err != nil {
+					slog.Warn("battery limit set failed", "err", err, "elapsed", time.Since(start))
+				} else {
+					slog.Debug("sendBatteryLimitSet: done", "elapsed", time.Since(start))
 				}
 				return false
 			})
@@ -228,14 +240,22 @@ func (w *Window) syncBootSound() {
 
 // sendOverdriveSet sends a panel overdrive change to the daemon.
 func (w *Window) sendOverdriveSet(value int) {
+	slog.Debug("sendOverdriveSet: calling daemon", "value", value)
+	start := time.Now()
 	if _, err := api.SendPanelOverdriveSet(value); err != nil {
-		slog.Warn("panel overdrive set failed", "value", value, "err", err)
+		slog.Warn("panel overdrive set failed", "value", value, "err", err, "elapsed", time.Since(start))
+	} else {
+		slog.Debug("sendOverdriveSet: done", "elapsed", time.Since(start))
 	}
 }
 
 // sendBootSoundSet sends a boot sound change to the daemon.
 func (w *Window) sendBootSoundSet(value int) {
+	slog.Debug("sendBootSoundSet: calling daemon", "value", value)
+	start := time.Now()
 	if _, err := api.SendBootSoundSet(value); err != nil {
-		slog.Warn("boot sound set failed", "value", value, "err", err)
+		slog.Warn("boot sound set failed", "value", value, "err", err, "elapsed", time.Since(start))
+	} else {
+		slog.Debug("sendBootSoundSet: done", "elapsed", time.Since(start))
 	}
 }

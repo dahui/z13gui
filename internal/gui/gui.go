@@ -130,17 +130,20 @@ func New(app *gtk.Application) *Window {
 
 // Toggle shows or hides the drawer. Must be called from the GTK main thread.
 func (w *Window) Toggle() {
+	slog.Debug("toggle entered", "visible", w.visible)
 	if w.visible {
 		slog.Info("toggle", "action", "hide")
 		w.hide()
 	} else {
 		slog.Info("toggle", "action", "show")
 		w.show()
+		fetchStart := time.Now()
 		go func() {
 			ok, state, err := api.SendGetState()
+			slog.Debug("SendGetState returned", "ok", ok, "err", err, "elapsed", time.Since(fetchStart))
 			if ok && err == nil {
-				slog.Debug("state fetched", "profile", state.Profile, "battery", state.Battery)
 				glib.IdleAdd(func() {
+					slog.Debug("syncState dispatched", "totalElapsed", time.Since(fetchStart))
 					w.state = state
 					w.syncState()
 				})
@@ -153,6 +156,7 @@ func (w *Window) Toggle() {
 
 // show delegates to the display backend.
 func (w *Window) show() {
+	slog.Debug("show called")
 	w.visible = true
 	w.backend.Show()
 }
@@ -160,6 +164,7 @@ func (w *Window) show() {
 // hide delegates to the display backend. Resets to main view so the drawer
 // always opens to the home screen.
 func (w *Window) hide() {
+	slog.Debug("hide called", "wasVisible", w.visible)
 	w.visible = false
 	if w.viewStack != nil {
 		w.viewStack.SetVisibleChildName("main")

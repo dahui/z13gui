@@ -225,12 +225,13 @@ func (b *Backend) WrapContent(drawer gtk.Widgetter) gtk.Widgetter {
 // Show makes the overlay visible by setting full opacity and captures input
 // via X11 grabs (primary) and STEAM_INPUT_FOCUS (secondary, for production).
 func (b *Backend) Show() {
+	slog.Debug("gamescope: Show enter", "ready", b.ready)
 	if b.ready {
 		b.setCardinal("_NET_WM_WINDOW_OPACITY", 0xFFFFFFFF)
 		b.setAtom("STEAM_INPUT_FOCUS", true)
-		C.grab_keyboard(b.xdisplay, b.xid)
-		C.grab_pointer(b.xdisplay, b.xid)
-		slog.Debug("gamescope: overlay shown")
+		kbResult := C.grab_keyboard(b.xdisplay, b.xid)
+		ptrResult := C.grab_pointer(b.xdisplay, b.xid)
+		slog.Debug("gamescope: overlay shown", "grabKB", int(kbResult), "grabPtr", int(ptrResult))
 	} else {
 		slog.Warn("gamescope: Show() called but XID not ready")
 	}
@@ -239,6 +240,7 @@ func (b *Backend) Show() {
 
 // Hide releases input grabs and hides the overlay via zero opacity.
 func (b *Backend) Hide() {
+	slog.Debug("gamescope: Hide enter", "ready", b.ready)
 	if b.ready {
 		C.ungrab_keyboard(b.xdisplay)
 		C.ungrab_pointer(b.xdisplay)
