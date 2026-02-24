@@ -234,47 +234,10 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 		w.themeRadios = append(w.themeRadios, btn)
 		box.Append(btn)
 
-		// Accent dots — shown for themes that have accent variants.
-		var dots []*gtk.Button
-		if len(t.Accents) > 0 {
-			accentLabel := gtk.NewLabel("Accent Color")
-			accentLabel.SetXAlign(0)
-			accentLabel.AddCSSClass("accent-label")
-			accentLabel.SetMarginStart(12)
-			accentLabel.SetMarginTop(2)
-			box.Append(accentLabel)
-
-			dotsGrid := gtk.NewBox(gtk.OrientationVertical, 4)
-			dotsGrid.SetMarginStart(12)
-			dotsGrid.SetMarginBottom(4)
-
-			const dotsPerRow = 7
-			var row *gtk.Box
-			for i, ac := range t.Accents {
-				ac := ac
-				if i%dotsPerRow == 0 {
-					row = gtk.NewBox(gtk.OrientationHorizontal, 4)
-					dotsGrid.Append(row)
-				}
-				dot := gtk.NewButton()
-				dot.AddCSSClass("color-preset")
-				dot.SetHExpand(true)
-				if id == activeCfg.Theme && ac.ID == activeCfg.Accent {
-					dot.AddCSSClass("accent-dot-active")
-				}
-				provider := gtk.NewCSSProvider()
-				provider.LoadFromString("button.color-preset { background: " + ac.Hex + "; }")
-				dot.StyleContext().AddProvider(provider, gtk.STYLE_PROVIDER_PRIORITY_USER+20) //nolint:staticcheck // per-widget dynamic color; no style-class alternative for unique hex backgrounds
-				dot.SetTooltipText(ac.Name)
-				dot.ConnectClicked(func() {
-					btn.SetActive(true)
-					w.applyTheme(id, ac.ID)
-				})
-				dots = append(dots, dot)
-				row.Append(dot)
-			}
-			box.Append(dotsGrid)
-		}
+		dots := w.appendAccentDots(box, t.Accents,
+			func(ac theme.Accent) bool { return id == activeCfg.Theme && ac.ID == activeCfg.Accent },
+			func(ac theme.Accent) { btn.SetActive(true); w.applyTheme(id, ac.ID) },
+		)
 		w.themeDots = append(w.themeDots, dots)
 	}
 
@@ -296,47 +259,57 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 		w.themeRadios = append(w.themeRadios, customBtn)
 		box.Append(customBtn)
 
-		var dots []*gtk.Button
-		if len(w.customAccents) > 0 {
-			accentLabel := gtk.NewLabel("Accent Color")
-			accentLabel.SetXAlign(0)
-			accentLabel.AddCSSClass("accent-label")
-			accentLabel.SetMarginStart(12)
-			accentLabel.SetMarginTop(2)
-			box.Append(accentLabel)
-
-			dotsGrid := gtk.NewBox(gtk.OrientationVertical, 4)
-			dotsGrid.SetMarginStart(12)
-			dotsGrid.SetMarginBottom(4)
-
-			const dotsPerRow = 7
-			var row *gtk.Box
-			for i, ac := range w.customAccents {
-				ac := ac
-				if i%dotsPerRow == 0 {
-					row = gtk.NewBox(gtk.OrientationHorizontal, 4)
-					dotsGrid.Append(row)
-				}
-				dot := gtk.NewButton()
-				dot.AddCSSClass("color-preset")
-				dot.SetHExpand(true)
-				if ac.ID == activeCfg.Accent {
-					dot.AddCSSClass("accent-dot-active")
-				}
-				provider := gtk.NewCSSProvider()
-				provider.LoadFromString("button.color-preset { background: " + ac.Hex + "; }")
-				dot.StyleContext().AddProvider(provider, gtk.STYLE_PROVIDER_PRIORITY_USER+20) //nolint:staticcheck // per-widget dynamic color; no style-class alternative for unique hex backgrounds
-				dot.SetTooltipText(ac.Name)
-				dot.ConnectClicked(func() {
-					w.applyCustomAccent(ac.ID)
-				})
-				dots = append(dots, dot)
-				row.Append(dot)
-			}
-			box.Append(dotsGrid)
-		}
+		dots := w.appendAccentDots(box, w.customAccents,
+			func(ac theme.Accent) bool { return ac.ID == activeCfg.Accent },
+			func(ac theme.Accent) { w.applyCustomAccent(ac.ID) },
+		)
 		w.themeDots = append(w.themeDots, dots)
 	}
+}
+
+// appendAccentDots builds the "Accent Color" label and dot button grid for the
+// given accent list and appends both to box. Returns the dot buttons for use
+// in the focus list. isActive reports whether a dot should be marked active;
+// onClick is called when a dot is clicked.
+func (w *Window) appendAccentDots(box *gtk.Box, accents []theme.Accent, isActive func(theme.Accent) bool, onClick func(theme.Accent)) []*gtk.Button {
+	if len(accents) == 0 {
+		return nil
+	}
+	accentLabel := gtk.NewLabel("Accent Color")
+	accentLabel.SetXAlign(0)
+	accentLabel.AddCSSClass("accent-label")
+	accentLabel.SetMarginStart(12)
+	accentLabel.SetMarginTop(2)
+	box.Append(accentLabel)
+
+	dotsGrid := gtk.NewBox(gtk.OrientationVertical, 4)
+	dotsGrid.SetMarginStart(12)
+	dotsGrid.SetMarginBottom(4)
+
+	var dots []*gtk.Button
+	var row *gtk.Box
+	for i, ac := range accents {
+		ac := ac
+		if i%dotsPerRow == 0 {
+			row = gtk.NewBox(gtk.OrientationHorizontal, 4)
+			dotsGrid.Append(row)
+		}
+		dot := gtk.NewButton()
+		dot.AddCSSClass("color-preset")
+		dot.SetHExpand(true)
+		if isActive(ac) {
+			dot.AddCSSClass("accent-dot-active")
+		}
+		provider := gtk.NewCSSProvider()
+		provider.LoadFromString("button.color-preset { background: " + ac.Hex + "; }")
+		dot.StyleContext().AddProvider(provider, gtk.STYLE_PROVIDER_PRIORITY_USER+20) //nolint:staticcheck // per-widget dynamic color; no style-class alternative for unique hex backgrounds
+		dot.SetTooltipText(ac.Name)
+		dot.ConnectClicked(func() { onClick(ac) })
+		dots = append(dots, dot)
+		row.Append(dot)
+	}
+	box.Append(dotsGrid)
+	return dots
 }
 
 // buildColorPickerView builds the HSL color picker view.
@@ -495,6 +468,9 @@ func (w *Window) buildTabRow() *gtk.Box {
 	return row
 }
 
+// dotsPerRow is the number of accent color dots per row in the theme picker.
+const dotsPerRow = 7
+
 // modeOrder defines the display order for lighting mode buttons.
 var modeOrder = []string{
 	"static", "breathe", "cycle",
@@ -544,7 +520,6 @@ func (w *Window) buildSpeedBox() *gtk.Box {
 	box.Append(sectionLabel("SPEED"))
 
 	speedRow := gtk.NewBox(gtk.OrientationHorizontal, 4)
-	speeds := []string{"slow", "normal", "fast"}
 	var firstSpeed *gtk.CheckButton
 	for _, s := range speeds {
 		sp := s
@@ -592,6 +567,9 @@ func (w *Window) buildBrightnessBox() *gtk.Box {
 
 // profiles lists the available sysfs performance profiles.
 var profiles = []string{"quiet", "balanced", "performance"}
+
+// speeds lists the available lighting animation speeds.
+var speeds = []string{"slow", "normal", "fast"}
 
 // buildProfileSection creates the profile radio buttons (quiet/balanced/performance).
 func (w *Window) buildProfileSection() *gtk.Box {
@@ -757,8 +735,7 @@ func (w *Window) buildMainFocusList() {
 	}
 
 	// Speed buttons — horizontal row.
-	speedOrder := []string{"slow", "normal", "fast"}
-	for col, s := range speedOrder {
+	for col, s := range speeds {
 		btn := w.speedBtns[s]
 		items = append(items, focusItem{
 			widget: btn, row: 11, col: col,
@@ -810,7 +787,6 @@ func (w *Window) buildMainFocusList() {
 // Must be called after appendThemeChoices has populated w.themeRadios/w.themeDots.
 func (w *Window) buildThemeFocusList() {
 	var items []focusItem
-	const dotsPerRow = 7
 
 	// Row 0: back button.
 	if w.themeBackBtn != nil {

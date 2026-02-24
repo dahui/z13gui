@@ -19,7 +19,7 @@ type filterHandler struct {
 // appLevel controls the threshold for application log messages.
 // gtkLevel controls the threshold for GTK/GLib messages (identified by the
 // "glib_domain" attribute that gotk4 adds to every GLib log record).
-func NewFilterHandler(inner slog.Handler, appLevel, gtkLevel slog.Level) *filterHandler {
+func NewFilterHandler(inner slog.Handler, appLevel, gtkLevel slog.Level) slog.Handler {
 	return &filterHandler{inner: inner, appLevel: appLevel, gtkLevel: gtkLevel}
 }
 

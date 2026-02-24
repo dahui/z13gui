@@ -48,17 +48,17 @@ type Window struct {
 	themeProvider  *gtk.CSSProvider // current theme; replaced on applyTheme()
 
 	// Widget references for syncState.
-	tabKB       *gtk.CheckButton
-	tabLB       *gtk.CheckButton
-	modeButtons map[string]*gtk.CheckButton
-	color1      *colorInput
-	color2      *colorInput
-	color1Box   *gtk.Box // COLOR 1 label + row — visibility toggled by syncModeVis
-	color2Box   *gtk.Box // COLOR 2 label + row — visibility toggled by syncModeVis
-	speedBox    *gtk.Box // SPEED label + row — visibility toggled by syncModeVis
-	brightBox   *gtk.Box // BRIGHTNESS label + scale — hidden when mode is "off"
-	speedBtns   map[string]*gtk.CheckButton
-	brightScale *gtk.Scale
+	tabKB           *gtk.CheckButton
+	tabLB           *gtk.CheckButton
+	modeButtons     map[string]*gtk.CheckButton
+	color1          *colorInput
+	color2          *colorInput
+	color1Box       *gtk.Box // COLOR 1 label + row — visibility toggled by syncModeVis
+	color2Box       *gtk.Box // COLOR 2 label + row — visibility toggled by syncModeVis
+	speedBox        *gtk.Box // SPEED label + row — visibility toggled by syncModeVis
+	brightBox       *gtk.Box // BRIGHTNESS label + scale — hidden when mode is "off"
+	speedBtns       map[string]*gtk.CheckButton
+	brightScale     *gtk.Scale
 	profileBtns     map[string]*gtk.CheckButton
 	battScale       *gtk.Scale
 	overdriveSwitch *gtk.Switch
@@ -71,20 +71,20 @@ type Window struct {
 	mainScroll         *gtk.ScrolledWindow // scrollable area in main drawer view
 	themeScroll        *gtk.ScrolledWindow // scrollable area in theme picker view
 	viewStack          *gtk.Stack          // switches between main/theme/color views
-	editingColor       *colorInput      // which color the color-picker view is editing
-	colorViewTitle     *gtk.Label       // "COLOR 1" or "COLOR 2" in color view header
-	colorHue           *gtk.Scale       // H: 0-360
-	colorSat           *gtk.Scale       // S: 0-100
-	colorLit           *gtk.Scale       // L: 0-100
-	colorPreview       *gtk.Box         // swatch preview in color view
-	colorHexLabel      *gtk.Label       // hex display in color view
-	colorSwatchProv    *gtk.CSSProvider // color picker preview swatch CSS
-	paletteBtn         *gtk.Button      // theme button in bottom bar
-	themeBackBtn       *gtk.Button      // back button in theme view
-	colorBackBtn       *gtk.Button      // back button in color picker view
-	colorPickerPresets []*gtk.Button    // preset buttons in color picker view
-	themeRadios        []*gtk.CheckButton // collected during appendThemeChoices
-	themeDots          [][]*gtk.Button    // accent dot buttons per theme
+	editingColor       *colorInput         // which color the color-picker view is editing
+	colorViewTitle     *gtk.Label          // "COLOR 1" or "COLOR 2" in color view header
+	colorHue           *gtk.Scale          // H: 0-360
+	colorSat           *gtk.Scale          // S: 0-100
+	colorLit           *gtk.Scale          // L: 0-100
+	colorPreview       *gtk.Box            // swatch preview in color view
+	colorHexLabel      *gtk.Label          // hex display in color view
+	colorSwatchProv    *gtk.CSSProvider    // color picker preview swatch CSS
+	paletteBtn         *gtk.Button         // theme button in bottom bar
+	themeBackBtn       *gtk.Button         // back button in theme view
+	colorBackBtn       *gtk.Button         // back button in color picker view
+	colorPickerPresets []*gtk.Button       // preset buttons in color picker view
+	themeRadios        []*gtk.CheckButton  // collected during appendThemeChoices
+	themeDots          [][]*gtk.Button     // accent dot buttons per theme
 
 	// Custom theme state (set when theme.toml exists).
 	isCustomTheme bool
@@ -119,7 +119,7 @@ func New(app *gtk.Application) *Window {
 	w.gtkWin = &w.win.Window
 
 	// Select display backend.
-	if os.Getenv("GAMESCOPE_WAYLAND_DISPLAY") != "" {
+	if w.gamescope {
 		w.backend = gamescope.New(w.win, w.gtkWin, drawerWidth)
 	} else {
 		w.backend = layershell.New(w.win, w.gtkWin, drawerWidth)
