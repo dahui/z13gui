@@ -13,6 +13,7 @@ GTK4 overlay drawer for [z13ctl](https://github.com/dahui/z13ctl) on Wayland.
 - [Usage](#usage)
 - [Themes](#themes)
 - [Command-line Flags](#command-line-flags)
+- [Environment Variables](#environment-variables)
 - [Configuration](#configuration)
 - [Contributing](#contributing)
 
@@ -28,9 +29,19 @@ daemon broadcasts a `gui-toggle` event over its subscribe socket, and z13gui
 listens for it. All hardware communication goes through z13ctl -- the GUI never
 touches HID devices or sysfs directly.
 
+Two display backends are supported:
+
+- **Layer-shell** (KDE Plasma, Hyprland, Sway) -- Wayland layer-shell overlay
+  with margin-based slide animation
+- **Gamescope** (Steam Gaming Mode) -- X11 overlay via `STEAM_OVERLAY` atom
+  with opacity-based visibility
+
+The backend is selected automatically based on the session environment.
+
 ## Requirements
 
-- Wayland compositor (tested on KDE Plasma)
+- Wayland compositor with layer-shell support (tested on KDE Plasma), or
+  gamescope (Steam Gaming Mode)
 - `gtk4-layer-shell` library (pkg-config: `gtk4-layer-shell-0`)
 - `z13ctl` daemon running (see [z13ctl installation](https://github.com/dahui/z13ctl#installation))
 
@@ -50,13 +61,27 @@ for setup instructions.
 
 **From source:**
 
-Requires Go 1.22+, CGO enabled, and the `gtk4-layer-shell` C library.
+Requires Go 1.23+, CGO enabled, and GTK4 development libraries.
+
+Build dependencies (Debian/Ubuntu):
+
+```sh
+sudo apt-get install -y libgtk-4-dev libgtk4-layer-shell-dev
+```
+
+Build dependencies (Arch Linux):
+
+```sh
+sudo pacman -S gtk4 gtk4-layer-shell
+```
+
+Then build and install:
 
 ```sh
 git clone https://github.com/dahui/z13gui
 cd z13gui
 make build
-sudo install -Dm755 z13gui /usr/local/bin/z13gui
+sudo make install
 ```
 
 ## Running as a Service
@@ -102,7 +127,7 @@ journalctl --user -u z13gui -f
 ## Usage
 
 Press the Armoury Crate button on your Z13 to open the drawer. Press it again
-(or click outside the drawer) to close it.
+(or click outside the drawer, or press Escape) to close it.
 
 The drawer provides controls for:
 
@@ -119,6 +144,27 @@ The drawer provides controls for:
 - **Boot Sound** -- enable or disable the startup sound
 
 Changes are sent to the z13ctl daemon immediately and persist across reboots.
+
+### Gamepad Controls
+
+z13gui supports gamepad/controller navigation for use in Steam Gaming Mode:
+
+- **D-pad** -- navigate between controls
+- **A (Cross)** -- activate buttons/switches or enter edit mode for sliders
+- **B (Circle)** -- cancel edit, go back, or close the drawer
+- **Shoulder buttons** -- jump between sections
+
+Gamepad focus is automatically hidden when the mouse moves. Set
+`Z13GUI_NO_GAMEPAD=1` to disable gamepad input entirely.
+
+### Gamescope (Steam Gaming Mode)
+
+In Steam Gaming Mode, z13gui runs as a gamescope X11 overlay. Popups and
+dropdowns are replaced with full-view alternatives (theme picker view, HSL
+color picker view) because gamescope does not composite separate popup windows.
+
+The UI is automatically scaled based on the output resolution. Use the
+`Z13GUI_SCALE` environment variable to override the auto-detected scale factor.
 
 ## Themes
 
@@ -143,6 +189,17 @@ values. See [THEMING.md](THEMING.md) for the full theming guide.
 ```sh
 z13gui --print-theme > ~/.config/z13gui/theme.toml
 ```
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `Z13GUI_SCALE` | Override CSS scale factor in gamescope mode (default: auto-detected from output resolution) |
+| `Z13GUI_NO_GAMEPAD` | Set to `1` to disable gamepad input |
+
+z13gui also sets `GTK_A11Y=none` internally to disable the GTK4 accessibility
+bridge. This prevents D-Bus timeouts when running under systemd where the
+AT-SPI bus may be unavailable.
 
 ## Configuration
 
