@@ -10,6 +10,33 @@
 
 ## Install
 
+=== "Arch Linux (AUR)"
+
+    ```sh
+    paru -S z13gui-bin
+    ```
+
+    Or with yay:
+
+    ```sh
+    yay -S z13gui-bin
+    ```
+
+    The package installs the binary, systemd service, udev rules, and desktop entry.
+    Services are enabled automatically for all users on next login.
+
+=== "Linuxbrew"
+
+    ```sh
+    brew install dahui/z13ctl/z13gui
+    ```
+
+    Then enable the systemd service:
+
+    ```sh
+    systemctl --user enable --now z13gui
+    ```
+
 === "Release binary"
 
     Download the latest `linux_amd64` archive from the
