@@ -173,7 +173,7 @@ at the bottom of the drawer lets you switch between them. Catppuccin themes
 also support 14 accent color variants.
 
 You can create your own theme by writing a simple TOML file with 7 color
-values. See [THEMING.md](THEMING.md) for the full theming guide.
+values. See the [theming guide](https://dahui.github.io/z13gui/theming/) for the full reference.
 
 ## Command-line Flags
 

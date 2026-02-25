@@ -24,10 +24,68 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
-      - contrib/*
+      - contrib/z13gui.service
+      - contrib/z13gui.desktop
+      - contrib/99-z13gui-gamepad.rules
 
 checksum:
   name_template: "checksums.txt"
+
+nfpms:
+  - id: z13gui-pkg
+    package_name: z13gui
+    formats:
+      - archlinux
+    homepage: https://github.com/dahui/z13gui
+    maintainer: "Jeff Hagadorn <noreply@github.com>"
+    description: GTK4 overlay GUI companion for z13ctl
+    license: Apache-2.0
+    provides:
+      - z13gui
+    dependencies:
+      - gtk4
+      - gtk4-layer-shell
+      - z13ctl
+    scripts:
+      postinstall: contrib/nfpm/postinstall.sh
+    contents:
+      - src: LICENSE
+        dst: /usr/share/licenses/z13gui/LICENSE
+      - src: contrib/z13gui.service
+        dst: /usr/lib/systemd/user/z13gui.service
+      - src: contrib/z13gui.desktop
+        dst: /usr/share/applications/z13gui.desktop
+      - src: contrib/99-z13gui-gamepad.rules
+        dst: /usr/lib/udev/rules.d/99-z13gui-gamepad.rules
+    archlinux:
+      packager: "Jeff Hagadorn <noreply@github.com>"
+
+homebrew_casks:
+  - name: z13gui
+    repository:
+      owner: dahui
+      name: homebrew-z13ctl
+      token: '{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}'
+    homepage: https://github.com/dahui/z13gui
+    description: GTK4 overlay GUI companion for z13ctl
+    skip_upload: auto
+    caveats: |
+      This tool is Linux-only and requires GTK4, gtk4-layer-shell, and z13ctl.
+
+      gtk4-layer-shell is not available in Homebrew. Install all runtime
+      dependencies via your system package manager before use:
+
+        # Arch Linux:
+        sudo pacman -S gtk4 gtk4-layer-shell z13ctl
+
+        # Debian/Ubuntu:
+        sudo apt-get install libgtk-4-1 libgtk4-layer-shell-dev
+
+      Then enable the z13ctl daemon:
+        systemctl --user enable --now z13ctl.socket z13ctl.service
+
+      And enable the z13gui service:
+        systemctl --user enable --now z13gui
 
 release:
   draft: false
