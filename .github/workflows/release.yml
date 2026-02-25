@@ -36,7 +36,7 @@ jobs:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.release)
     steps:
       - name: Install dependencies
-        run: pacman -Syu --noconfirm git base-devel go gtk4 gtk4-layer-shell
+        run: pacman -Syu --noconfirm git base-devel go gtk4 gtk4-layer-shell gobject-introspection
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
