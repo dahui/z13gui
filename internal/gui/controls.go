@@ -514,36 +514,48 @@ func (w *Window) buildModeSection() *gtk.Box {
 	return box
 }
 
-// buildSpeedBox creates the slow/normal/fast radio button row.
-func (w *Window) buildSpeedBox() *gtk.Box {
-	box := gtk.NewBox(gtk.OrientationVertical, 4)
-	box.Append(sectionLabel("SPEED"))
-
-	speedRow := gtk.NewBox(gtk.OrientationHorizontal, 4)
-	var firstSpeed *gtk.CheckButton
-	for _, s := range speeds {
-		sp := s
-		btn := gtk.NewCheckButtonWithLabel(strings.Title(sp)) //nolint:staticcheck // strings.Title is fine for ASCII-only mode/speed/profile labels
-		if firstSpeed == nil {
-			firstSpeed = btn
+// buildRadioButtons creates a group of CheckButtons for the given options,
+// stores each in dst[option], and calls onChange when a button is activated.
+func (w *Window) buildRadioButtons(
+	orientation gtk.Orientation,
+	options []string,
+	dst map[string]*gtk.CheckButton,
+	onChange func(string),
+) *gtk.Box {
+	row := gtk.NewBox(orientation, 4)
+	var first *gtk.CheckButton
+	for _, opt := range options {
+		opt := opt
+		btn := gtk.NewCheckButtonWithLabel(strings.Title(opt)) //nolint:staticcheck // strings.Title is fine for ASCII-only mode/speed/profile labels
+		if first == nil {
+			first = btn
 		} else {
-			btn.SetGroup(firstSpeed)
+			btn.SetGroup(first)
 		}
 		btn.ConnectToggled(func() {
 			if btn.Active() {
-				w.sendApply()
+				onChange(opt)
 			}
 		})
 		if w.gamescope {
 			addTouchActivate(btn, func() { btn.SetActive(true) })
 		}
-		w.speedBtns[sp] = btn
-		speedRow.Append(btn)
+		dst[opt] = btn
+		row.Append(btn)
 	}
+	return row
+}
+
+// buildSpeedBox creates the slow/normal/fast radio button row.
+func (w *Window) buildSpeedBox() *gtk.Box {
+	box := gtk.NewBox(gtk.OrientationVertical, 4)
+	box.Append(sectionLabel("SPEED"))
+	box.Append(w.buildRadioButtons(gtk.OrientationHorizontal, speeds, w.speedBtns, func(_ string) {
+		w.sendApply()
+	}))
 	if normal, ok := w.speedBtns["normal"]; ok {
 		normal.SetActive(true)
 	}
-	box.Append(speedRow)
 	return box
 }
 
@@ -575,30 +587,11 @@ var speeds = []string{"slow", "normal", "fast"}
 func (w *Window) buildProfileSection() *gtk.Box {
 	box := gtk.NewBox(gtk.OrientationVertical, 4)
 	box.Append(sectionLabel("PROFILE"))
-
-	row := gtk.NewBox(gtk.OrientationVertical, 4)
-	var first *gtk.CheckButton
-	for _, p := range profiles {
-		prof := p
-		btn := gtk.NewCheckButtonWithLabel(strings.Title(prof)) //nolint:staticcheck // strings.Title is fine for ASCII-only mode/speed/profile labels
-		if first == nil {
-			first = btn
-		} else {
-			btn.SetGroup(first)
+	box.Append(w.buildRadioButtons(gtk.OrientationVertical, profiles, w.profileBtns, func(prof string) {
+		if !w.syncing {
+			w.sendProfileSet(prof)
 		}
-		btn.ConnectToggled(func() {
-			if btn.Active() && !w.syncing {
-				w.sendProfileSet(prof)
-			}
-		})
-		if w.gamescope {
-			addTouchActivate(btn, func() { btn.SetActive(true) })
-		}
-		w.profileBtns[prof] = btn
-		row.Append(btn)
-	}
-
-	box.Append(row)
+	}))
 	return box
 }
 

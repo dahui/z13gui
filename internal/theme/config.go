@@ -1,6 +1,7 @@
 package theme
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,12 +51,17 @@ func LoadAppConfig() AppConfig {
 // SaveAppConfig writes the app config to ~/.config/z13gui/config.toml.
 func SaveAppConfig(cfg AppConfig) {
 	dir := filepath.Join(XDGConfigHome(), "z13gui")
-	_ = os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		slog.Warn("failed to create config dir", "path", dir, "err", err)
+		return
+	}
 	content := "# z13gui app configuration\ntheme = \"" + cfg.Theme + "\"\n"
 	if cfg.Accent != "" {
 		content += "accent = \"" + cfg.Accent + "\"\n"
 	}
-	_ = os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0o644); err != nil {
+		slog.Warn("failed to write config", "err", err)
+	}
 }
 
 // XDGConfigHome returns $XDG_CONFIG_HOME or falls back to ~/.config.
@@ -63,6 +69,10 @@ func XDGConfigHome() string {
 	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
 		return v
 	}
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		slog.Warn("failed to get home directory", "err", err)
+		return "/tmp/.config"
+	}
 	return filepath.Join(home, ".config")
 }

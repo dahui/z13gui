@@ -12,6 +12,15 @@ import (
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
+// Defaults used when widget state is unavailable (e.g. before first sync).
+const (
+	defaultColor1     = "FF0000"
+	defaultColor2     = "000000"
+	defaultMode       = "static"
+	defaultSpeed      = "normal"
+	defaultBrightness = 3
+)
+
 // modeVis defines which subsections are visible for a given lighting mode.
 type modeVis struct{ color1, color2, speed, brightness bool }
 
@@ -144,16 +153,16 @@ func (w *Window) sendApply() {
 	if w.syncing {
 		return
 	}
-	color1 := "FF0000"
+	color1 := defaultColor1
 	if w.color1 != nil {
 		color1 = w.color1.hex
 	}
-	color2 := "000000"
+	color2 := defaultColor2
 	if w.color2 != nil {
 		color2 = w.color2.hex
 	}
 
-	mode := "static"
+	mode := defaultMode
 	for m, btn := range w.modeButtons {
 		if btn.Active() {
 			mode = m
@@ -161,7 +170,7 @@ func (w *Window) sendApply() {
 		}
 	}
 
-	speed := "normal"
+	speed := defaultSpeed
 	for s, btn := range w.speedBtns {
 		if btn.Active() {
 			speed = s
@@ -169,7 +178,7 @@ func (w *Window) sendApply() {
 		}
 	}
 
-	brightness := 3
+	brightness := defaultBrightness
 	if w.brightScale != nil {
 		brightness = int(w.brightScale.Value())
 	}

@@ -15,7 +15,11 @@ import (
 )
 
 const (
-	animDuration = 200 * time.Millisecond // slide animation duration
+	animDuration    = 200 * time.Millisecond // slide animation duration
+	animGrace       = 300 * time.Millisecond // post-show grace before honouring dismiss
+	focusLossDelay  = 200                    // ms; confirmation delay before auto-hide
+	hiddenMarginPad = 80                     // extra px beyond drawerWidth for hidden margin
+	marginFraction  = 20                     // screen height / N for 5% top/bottom margins
 )
 
 // Backend manages the layer-shell overlay drawer on Wayland compositors.
@@ -33,13 +37,12 @@ type Backend struct {
 
 // New creates a layer-shell backend. drawerWidth is the drawer panel width in pixels.
 func New(appWin *gtk.ApplicationWindow, gtkWin *gtk.Window, drawerWidth int) *Backend {
-	hidden := -(drawerWidth + 80) // extra buffer for wider surfaces
 	return &Backend{
 		appWin:       appWin,
 		gtkWin:       gtkWin,
 		drawerWidth:  drawerWidth,
-		hiddenMargin: hidden,
-		margin:       hidden,
+		hiddenMargin: -(drawerWidth + hiddenMarginPad),
+		margin:       -(drawerWidth + hiddenMarginPad),
 	}
 }
 
@@ -69,7 +72,7 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 			return
 		}
 		geo := monitor.Geometry()
-		margin := geo.Height() / 20
+		margin := geo.Height() / marginFraction
 		gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeTop, margin)
 		gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeBottom, margin)
 	})
@@ -110,7 +113,7 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 			return
 		}
 		slog.Debug("focus lost with pointer outside, dismissing after delay")
-		glib.TimeoutAdd(200, func() bool {
+		glib.TimeoutAdd(focusLossDelay, func() bool {
 			if !isVisible() || b.appWin.IsActive() || b.animating {
 				slog.Debug("dismiss cancelled: hidden, refocused, or animating")
 				return false
@@ -143,55 +146,32 @@ func (b *Backend) WrapContent(drawer gtk.Widgetter) gtk.Widgetter {
 
 // Show starts the slide-in animation using a smoothstep easing curve.
 func (b *Backend) Show() {
-	slog.Debug("backend.Show", "startMargin", b.margin, "gen", b.animGen+1)
+	slog.Debug("backend.Show", "startMargin", b.margin)
 	gtk4layershell.SetKeyboardMode(b.gtkWin, gtk4layershell.LayerShellKeyboardModeOnDemand)
 
-	b.animGen++
-	gen := b.animGen
-	b.animating = true
-	startMargin := b.margin
-	startTime := time.Now()
+	var gen uint64
+	gen = b.slideMargin(0, func() {
+		b.appWin.Present()
 
-	glib.TimeoutAdd(16, func() bool {
-		if b.animGen != gen {
-			slog.Debug("show anim cancelled", "gen", gen, "currentGen", b.animGen)
+		// Keep animating guard active for a grace period after show completes.
+		// KDE Plasma's async keyboard-mode handling can send delayed focus
+		// revocations after SetKeyboardMode(OnDemand); the grace period lets
+		// the compositor settle before we honour dismiss events.
+		glib.TimeoutAdd(uint(animGrace.Milliseconds()), func() bool {
+			if b.animGen == gen {
+				b.animating = false
+				b.appWin.Present()
+			}
 			return false
-		}
-		t := float64(time.Since(startTime)) / float64(animDuration)
-		if t >= 1.0 {
-			b.margin = 0
-			gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeRight, 0)
-			slog.Debug("show anim complete", "gen", gen)
-
-			// Surface is now fully on-screen. Present again so the compositor
-			// grants focus to the visible surface (the initial Present() fired
-			// while the surface was still off-screen).
-			b.appWin.Present()
-
-			// Keep animating guard active for 300ms after show completes.
-			// KDE Plasma's async keyboard-mode handling can send delayed
-			// focus revocations after SetKeyboardMode(OnDemand); the grace
-			// period lets the compositor settle before we honour dismiss events.
-			glib.TimeoutAdd(300, func() bool {
-				if b.animGen == gen {
-					b.animating = false
-					b.appWin.Present()
-				}
-				return false
-			})
-			return false
-		}
-		t = t * t * (3 - 2*t) // smoothstep
-		b.margin = startMargin + int(math.Round(float64(-startMargin)*t))
-		gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeRight, b.margin)
-		return true
+		})
 	})
+
 	b.appWin.Present()
 }
 
 // Hide starts the slide-out animation.
 func (b *Backend) Hide() {
-	slog.Debug("backend.Hide", "startMargin", b.margin, "gen", b.animGen+1)
+	slog.Debug("backend.Hide", "startMargin", b.margin)
 
 	// Clear GTK's internal focused-widget state before relinquishing keyboard
 	// interactivity. Without this, GTK retains a stale focus reference that
@@ -199,30 +179,44 @@ func (b *Backend) Hide() {
 	b.gtkWin.SetFocus(nil)
 
 	gtk4layershell.SetKeyboardMode(b.gtkWin, gtk4layershell.LayerShellKeyboardModeNone)
+	b.pointerInside = false // clear stale state; surface stays mapped off-screen
 
+	b.slideMargin(b.hiddenMargin, func() {
+		b.animating = false
+	})
+}
+
+// slideMargin animates b.margin from its current value to target over
+// animDuration using smoothstep easing. onDone is called on the main thread
+// when the animation completes (or nil to skip). Returns the animation
+// generation for use in post-completion callbacks.
+func (b *Backend) slideMargin(target int, onDone func()) uint64 {
 	b.animGen++
 	gen := b.animGen
 	b.animating = true
-	b.pointerInside = false // clear stale state; surface stays mapped off-screen
-	startMargin := b.margin
-	startTime := time.Now()
+	start := b.margin
+	t0 := time.Now()
 
 	glib.TimeoutAdd(16, func() bool {
 		if b.animGen != gen {
-			slog.Debug("hide anim cancelled", "gen", gen, "currentGen", b.animGen)
+			slog.Debug("anim cancelled", "gen", gen, "currentGen", b.animGen)
 			return false
 		}
-		t := float64(time.Since(startTime)) / float64(animDuration)
+		t := float64(time.Since(t0)) / float64(animDuration)
 		if t >= 1.0 {
-			b.margin = b.hiddenMargin
-			b.animating = false
-			gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeRight, b.hiddenMargin)
-			slog.Debug("hide anim complete", "gen", gen)
+			b.margin = target
+			gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeRight, target)
+			slog.Debug("anim complete", "gen", gen, "margin", target)
+			if onDone != nil {
+				onDone()
+			}
 			return false
 		}
 		t = t * t * (3 - 2*t) // smoothstep
-		b.margin = startMargin + int(math.Round(float64(b.hiddenMargin-startMargin)*t))
+		b.margin = start + int(math.Round(float64(target-start)*t))
 		gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeRight, b.margin)
 		return true
 	})
+
+	return gen
 }

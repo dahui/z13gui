@@ -60,6 +60,14 @@ import (
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
+const (
+	referenceWidth = 1707.0      // 2560 / 1.5; matches KDE 150% at Z13 native resolution
+	minScale       = 1.0         // lower bound for UI scale
+	maxScale       = 3.0         // upper bound for UI scale
+	marginFraction = 20          // screen height / N for 5% top/bottom margins
+	fullOpacity    = 0xFFFFFFFF  // _NET_WM_WINDOW_OPACITY value for fully visible
+)
+
 // Backend manages the gamescope X11 overlay window.
 type Backend struct {
 	appWin      *gtk.ApplicationWindow
@@ -124,13 +132,13 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 					b.scale = v
 				}
 			} else {
-				b.scale = float64(geo.Width()) / 1707.0
+				b.scale = float64(geo.Width()) / referenceWidth
 			}
-			if b.scale < 1.0 {
-				b.scale = 1.0
+			if b.scale < minScale {
+				b.scale = minScale
 			}
-			if b.scale > 3.0 {
-				b.scale = 3.0
+			if b.scale > maxScale {
+				b.scale = maxScale
 			}
 			b.appWin.SetDefaultSize(geo.Width(), geo.Height())
 			slog.Info("gamescope: sized to monitor", "w", geo.Width(), "h", geo.Height(), "scale", b.scale)
@@ -188,7 +196,7 @@ func (b *Backend) WrapContent(drawer gtk.Widgetter) gtk.Widgetter {
 
 	// 5% top/bottom margins (matches layer-shell backend).
 	if b.outputHeight > 0 {
-		margin := b.outputHeight / 20
+		margin := b.outputHeight / marginFraction
 		panel.SetMarginTop(margin)
 		panel.SetMarginBottom(margin)
 	}
@@ -218,7 +226,7 @@ func (b *Backend) WrapContent(drawer gtk.Widgetter) gtk.Widgetter {
 func (b *Backend) Show() {
 	slog.Debug("gamescope: Show enter", "ready", b.ready)
 	if b.ready {
-		b.setCardinal("_NET_WM_WINDOW_OPACITY", 0xFFFFFFFF)
+		b.setCardinal("_NET_WM_WINDOW_OPACITY", fullOpacity)
 		b.setAtom("STEAM_INPUT_FOCUS", true)
 		kbResult := C.grab_keyboard(b.xdisplay, b.xid)
 		slog.Debug("gamescope: overlay shown", "grabKB", int(kbResult))
