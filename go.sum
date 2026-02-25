@@ -1,7 +1,7 @@
 github.com/KarpelesLab/weak v0.1.1 h1:fNnlPo3aypS9tBzoEQluY13XyUfd/eWaSE/vMvo9s4g=
 github.com/KarpelesLab/weak v0.1.1/go.mod h1:pzXsWs5f2bf+fpgHayTlBE1qJpO3MpJKo5sRaLu1XNw=
-github.com/dahui/z13ctl/api v1.0.0-beta2 h1:4XS3TXA8DBNYf1O3nGOHZ5ckf9Z/Oed0MQ63o/39nvQ=
-github.com/dahui/z13ctl/api v1.0.0-beta2/go.mod h1:WaV3cyrZkszY22RbnJh05/YXMapnP3BcyiAvtyRLnj8=
+github.com/dahui/z13ctl/api v1.0.0 h1:a2FLURnCOWSE6MyRuoT+tU+we6z8y1OMeDs2Oi9i9RU=
+github.com/dahui/z13ctl/api v1.0.0/go.mod h1:WaV3cyrZkszY22RbnJh05/YXMapnP3BcyiAvtyRLnj8=
 github.com/diamondburned/gotk4-layer-shell/pkg v0.0.0-20240109211357-6efa9f6dc438 h1:Ymnl4B+Fn4srLxXbRV2RY1iHT2SH3oAkOfxeEeMI3Fg=
 github.com/diamondburned/gotk4-layer-shell/pkg v0.0.0-20240109211357-6efa9f6dc438/go.mod h1:AjrxxF6teeNWgaEg0zIUwoqFtXlVTHlEGZvrOn7RXaQ=
 github.com/diamondburned/gotk4/pkg v0.3.1 h1:uhkXSUPUsCyz3yujdvl7DSN8jiLS2BgNTQE95hk6ygg=
