@@ -99,8 +99,8 @@ jobs:
 
       - name: Generate .SRCINFO
         run: |
-          docker run --rm -v "$PWD/contrib/aur:/pkg" -w /pkg archlinux:latest \
-            bash -c "pacman -Sy --noconfirm pacman-contrib && makepkg --printsrcinfo > .SRCINFO"
+          docker run --rm -v "$PWD/contrib/aur:/pkg" archlinux:latest \
+            bash -c "pacman -Sy --noconfirm pacman-contrib && useradd -m builder && su builder -c 'cd /pkg && makepkg --printsrcinfo > .SRCINFO'"
 
       - name: Configure SSH
         run: |
