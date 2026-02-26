@@ -11,6 +11,7 @@ Environment=GTK_A11Y=none
 EnvironmentFile=-%t/gamescope-environment
 Restart=on-failure
 RestartSec=3
+ExecStopPost=/bin/sh -c 'kill -CONT $(cat /run/user/%U/z13gui-frozen-pid 2>/dev/null) 2>/dev/null; rm -f /run/user/%U/z13gui-frozen-pid'
 
 [Install]
 WantedBy=graphical-session.target

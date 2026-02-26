@@ -90,7 +90,7 @@ func titleCase(s string) string {
 
 // IsHexColor returns true for valid CSS hex color strings: #rgb, #rrggbb, #rrggbbaa.
 func IsHexColor(s string) bool {
-	if len(s) == 0 || s[0] != '#' {
+	if s == "" || s[0] != '#' {
 		return false
 	}
 	rest := s[1:]

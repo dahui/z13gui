@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/dahui/z13gui/internal/gui"
+	"github.com/dahui/z13gui/internal/gui/gamepad"
 	"github.com/dahui/z13gui/internal/theme"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
@@ -82,6 +85,18 @@ func main() {
 			_ = os.Setenv("GDK_BACKEND", "x11")
 		}
 	}
+
+	// Thaw any Steam process left frozen from a previous crash.
+	gamepad.ThawFrozen()
+
+	// Signal handler: thaw Steam before exit on SIGTERM/SIGINT.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigCh
+		gamepad.ThawFrozen()
+		os.Exit(0)
+	}()
 
 	app := gtk.NewApplication("com.github.dahui.z13gui", 0)
 	app.ConnectActivate(func() {

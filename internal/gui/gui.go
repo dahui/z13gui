@@ -91,6 +91,9 @@ type Window struct {
 	customColors  theme.Colors
 	customAccents []theme.Accent
 
+	// Steam process freeze (gamescope only).
+	steamPID int
+
 	// Gamepad focus navigation.
 	gamepadReader     *gamepad.Reader
 	focusItems        []focusItem // active view's navigable widgets (points to one of the lists below)
@@ -156,7 +159,7 @@ func New(app *gtk.Application) *Window {
 
 	// Hide gamepad focus indicator on mouse movement.
 	motion := gtk.NewEventControllerMotion()
-	motion.ConnectMotion(func(x, y float64) {
+	motion.ConnectMotion(func(_, _ float64) {
 		if w.gamepadActive {
 			w.hideGamepadFocus()
 		}
@@ -168,7 +171,7 @@ func New(app *gtk.Application) *Window {
 	// The overlay uses mouse/touch/gamepad — not keyboard navigation.
 	keyBlock := gtk.NewEventControllerKey()
 	keyBlock.SetPropagationPhase(gtk.PhaseCapture)
-	keyBlock.ConnectKeyPressed(func(keyval, keycode uint, state gdk.ModifierType) bool {
+	keyBlock.ConnectKeyPressed(func(keyval, _ uint, _ gdk.ModifierType) bool {
 		switch keyval {
 		case gdk.KEY_Up, gdk.KEY_Down, gdk.KEY_Left, gdk.KEY_Right:
 			return true
@@ -214,6 +217,17 @@ func (w *Window) show() {
 	if w.gamepadReader != nil {
 		go w.gamepadReader.GrabAll()
 	}
+	if w.gamescope {
+		w.steamPID = gamepad.FindSteamPID()
+		if w.steamPID > 0 {
+			if err := gamepad.FreezeProc(w.steamPID); err != nil {
+				slog.Warn("steam: freeze failed", "pid", w.steamPID, "err", err)
+				w.steamPID = 0
+			} else {
+				slog.Info("steam: frozen", "pid", w.steamPID)
+			}
+		}
+	}
 	w.backend.Show()
 }
 
@@ -222,7 +236,24 @@ func (w *Window) show() {
 func (w *Window) hide() {
 	slog.Debug("hide called", "wasVisible", w.visible)
 	w.visible = false
-	if w.gamepadReader != nil {
+	// Delay thaw + ungrab so the dismiss button is released before Steam
+	// resumes input processing. The evdev grab stays held during the delay
+	// to prevent any input from reaching Steam's readers.
+	if w.gamescope && w.steamPID > 0 {
+		pid := w.steamPID
+		w.steamPID = 0
+		go func() {
+			time.Sleep(200 * time.Millisecond)
+			if err := gamepad.ThawProc(pid); err != nil {
+				slog.Warn("steam: thaw failed", "pid", pid, "err", err)
+			} else {
+				slog.Info("steam: thawed", "pid", pid)
+			}
+			if w.gamepadReader != nil {
+				w.gamepadReader.UngrabAll()
+			}
+		}()
+	} else if w.gamepadReader != nil {
 		go w.gamepadReader.UngrabAll()
 	}
 	w.hideGamepadFocus()
@@ -271,11 +302,12 @@ func (w *Window) handleGamepadAction(action gamepad.Action) {
 			w.activateOrEdit()
 		}
 	case gamepad.ActionBack:
-		if w.focusEditing {
+		switch {
+		case w.focusEditing:
 			w.exitEditMode(false)
-		} else if w.viewStack != nil && w.viewStack.VisibleChildName() != "main" {
+		case w.viewStack != nil && w.viewStack.VisibleChildName() != "main":
 			w.showMainView()
-		} else {
+		default:
 			w.hide()
 		}
 	case gamepad.ActionBumpL:

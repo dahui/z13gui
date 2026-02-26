@@ -22,7 +22,7 @@ func addTouchActivate(widget gtk.Widgetter, onTap func()) {
 	gesture := gtk.NewGestureClick()
 	gesture.SetTouchOnly(true)
 	gesture.SetPropagationPhase(gtk.PhaseCapture)
-	gesture.ConnectReleased(func(nPress int, x, y float64) {
+	gesture.ConnectReleased(func(_ int, _, _ float64) {
 		onTap()
 	})
 	gtk.BaseWidget(widget).AddController(gesture)
@@ -385,8 +385,8 @@ func (w *Window) buildColorPickerView() *gtk.Box {
 }
 
 // buildHSLScale creates a Scale for an HSL component.
-func (w *Window) buildHSLScale(name string, min, max float64) *gtk.Scale {
-	sc := gtk.NewScaleWithRange(gtk.OrientationHorizontal, min, max, 1)
+func (w *Window) buildHSLScale(_ string, lo, hi float64) *gtk.Scale {
+	sc := gtk.NewScaleWithRange(gtk.OrientationHorizontal, lo, hi, 1)
 	sc.SetDigits(0)
 	sc.SetDrawValue(true)
 	sc.SetFocusable(false)

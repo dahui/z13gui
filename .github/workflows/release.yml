@@ -67,19 +67,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Get version and sha256
+      - name: Get version, sha256, and pkgrel
         id: meta
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${TAG#v}"
           URL="https://github.com/dahui/z13gui/releases/download/${TAG}/z13gui_${VERSION}_linux_amd64.tar.gz"
           SHA256=$(curl -fsSL "$URL" | sha256sum | cut -d' ' -f1)
+
+          # Compute pkgrel: increment if same version already on AUR, else 1
+          PKGREL=1
+          if git clone --depth 1 https://aur.archlinux.org/z13gui-bin.git /tmp/aur-pkg 2>/dev/null; then
+            AUR_VER=$(grep -oP '^pkgver=\K.*' /tmp/aur-pkg/PKGBUILD || true)
+            AUR_REL=$(grep -oP '^pkgrel=\K.*' /tmp/aur-pkg/PKGBUILD || true)
+            if [ "$AUR_VER" = "$VERSION" ] && [ -n "$AUR_REL" ]; then
+              PKGREL=$((AUR_REL + 1))
+            fi
+            rm -rf /tmp/aur-pkg
+          fi
+
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "sha256=$SHA256"   >> "$GITHUB_OUTPUT"
+          echo "pkgrel=$PKGREL"   >> "$GITHUB_OUTPUT"
 
       - name: Patch PKGBUILD
         run: |
           sed -i "s/PKGVER_PLACEHOLDER/${{ steps.meta.outputs.version }}/" contrib/aur/PKGBUILD
+          sed -i "s/PKGREL_PLACEHOLDER/${{ steps.meta.outputs.pkgrel }}/"  contrib/aur/PKGBUILD
           sed -i "s/SHA256_PLACEHOLDER/${{ steps.meta.outputs.sha256 }}/"  contrib/aur/PKGBUILD
 
       - uses: KSXGitHub/github-actions-deploy-aur@v4.1.1

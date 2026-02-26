@@ -1,7 +1,7 @@
 // Package gamescope implements the X11 overlay display backend for gamescope
 // (Steam Gaming Mode). It sets X11 atoms on the window so gamescope composites
 // it as an external overlay above the running game.
-package gamescope
+package gamescope //nolint:gocritic // cgo requires separate import blocks
 
 /*
 #cgo pkg-config: gtk4 x11
@@ -47,14 +47,14 @@ static void ungrab_keyboard(void *xdisplay) {
 }
 
 */
-import "C"
+import "C" //nolint:gocritic // cgo requires standalone import
 
 import (
 	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
-	"unsafe"
+	"unsafe" //nolint:gocritic // used with cgo, requires separate import block
 
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
@@ -99,7 +99,7 @@ func New(appWin *gtk.ApplicationWindow, gtkWin *gtk.Window, drawerWidth int) *Ba
 // The window is kept mapped at all times; visibility is controlled by toggling
 // _NET_WM_WINDOW_OPACITY (0 = hidden, 0xFFFFFFFF = visible). This avoids the
 // Wayland surface lifecycle churn that SetVisible toggling causes in XWayland.
-func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
+func (b *Backend) Configure(_ func() bool, onDismiss func()) {
 	b.onDismiss = onDismiss
 	b.appWin.SetDecorated(false)
 
@@ -151,7 +151,7 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 
 	// Escape key dismiss.
 	key := gtk.NewEventControllerKey()
-	key.ConnectKeyPressed(func(keyval, keycode uint, state gdk.ModifierType) bool {
+	key.ConnectKeyPressed(func(keyval, _ uint, _ gdk.ModifierType) bool {
 		if keyval == 0xff1b { // GDK_KEY_Escape
 			onDismiss()
 			return true
@@ -176,7 +176,7 @@ func (b *Backend) WrapContent(drawer gtk.Widgetter) gtk.Widgetter {
 	backdrop.SetHExpand(true)
 	backdrop.AddCSSClass("gs-backdrop")
 	click := gtk.NewGestureClick()
-	click.ConnectReleased(func(nPress int, x, y float64) {
+	click.ConnectReleased(func(_ int, _, _ float64) {
 		slog.Debug("gamescope: backdrop clicked")
 		if b.onDismiss != nil {
 			b.onDismiss()

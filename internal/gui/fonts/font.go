@@ -8,13 +8,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"unsafe" //nolint:gocritic // used with cgo, requires separate import block
 )
 
 // #cgo pkg-config: fontconfig
 // #include <fontconfig/fontconfig.h>
 // #include <stdlib.h>
-import "C"
-import "unsafe"
+import "C" //nolint:gocritic // cgo requires standalone import
 
 //go:embed Inter-Regular.ttf
 var interRegular []byte
@@ -28,7 +28,7 @@ var interBold []byte
 // Must be called before any GTK CSS providers are loaded.
 func Register() {
 	dir := filepath.Join(runtimeDir(), "z13gui", "fonts")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:gocritic // err is checked
 		slog.Warn("fonts: cannot create dir", "path", dir, "err", err)
 		return
 	}
@@ -43,7 +43,7 @@ func Register() {
 		path := filepath.Join(dir, f.name)
 		// Skip write if file already exists with correct size.
 		if info, err := os.Stat(path); err != nil || info.Size() != int64(len(f.data)) {
-			if err := os.WriteFile(path, f.data, 0o644); err != nil {
+			if err := os.WriteFile(path, f.data, 0o644); err != nil { //nolint:gocritic // err is checked
 				slog.Warn("fonts: write failed", "path", path, "err", err)
 				continue
 			}

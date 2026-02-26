@@ -178,20 +178,20 @@ func hexToHSL(hex string) (h, s, l float64) {
 	_, _ = fmt.Sscanf(hex, "%02X%02X%02X", &ri, &gi, &bi)
 	r, g, b := float64(ri)/255, float64(gi)/255, float64(bi)/255
 
-	max := math.Max(r, math.Max(g, b))
-	min := math.Min(r, math.Min(g, b))
-	l = (max + min) / 2
+	maxC := math.Max(r, math.Max(g, b))
+	minC := math.Min(r, math.Min(g, b))
+	l = (maxC + minC) / 2
 
-	if max == min {
+	if maxC == minC {
 		return 0, 0, l * 100
 	}
-	d := max - min
+	d := maxC - minC
 	if l > 0.5 {
-		s = d / (2 - max - min)
+		s = d / (2 - maxC - minC)
 	} else {
-		s = d / (max + min)
+		s = d / (maxC + minC)
 	}
-	switch max {
+	switch maxC {
 	case r:
 		h = (g - b) / d
 		if g < b {

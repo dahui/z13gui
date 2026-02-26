@@ -86,7 +86,7 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 	// transitions, the pointer is still inside the drawer. When the user
 	// clicks outside, the pointer is outside.
 	motion := gtk.NewEventControllerMotion()
-	motion.ConnectEnter(func(x, y float64) {
+	motion.ConnectEnter(func(_, _ float64) {
 		b.pointerInside = true
 	})
 	motion.ConnectLeave(func() {
@@ -126,7 +126,7 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 
 	// Escape key dismiss (matches gamescope backend).
 	key := gtk.NewEventControllerKey()
-	key.ConnectKeyPressed(func(keyval, keycode uint, state gdk.ModifierType) bool {
+	key.ConnectKeyPressed(func(keyval, _ uint, _ gdk.ModifierType) bool {
 		if keyval == 0xff1b { // GDK_KEY_Escape
 			onDismiss()
 			return true
