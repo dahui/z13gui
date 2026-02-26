@@ -107,7 +107,11 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.AUR_KEY }}" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
-          ssh-keyscan -t ed25519,ecdsa,rsa aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          for i in 1 2 3; do
+            ssh-keyscan -t ed25519,ecdsa,rsa aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null && break
+            echo "Keyscan attempt $i failed, retrying in ${i}0s..."
+            sleep $((i * 10))
+          done
           cat >> ~/.ssh/config <<'EOF'
           Host aur.archlinux.org
             IdentityFile ~/.ssh/aur
@@ -116,7 +120,12 @@ jobs:
 
       - name: Push to AUR
         run: |
-          git clone ssh://aur@aur.archlinux.org/z13gui-bin.git /tmp/aur-repo
+          for i in 1 2 3; do
+            git clone ssh://aur@aur.archlinux.org/z13gui-bin.git /tmp/aur-repo && break
+            echo "Clone attempt $i failed, retrying in ${i}0s..."
+            rm -rf /tmp/aur-repo
+            sleep $((i * 10))
+          done
           cp contrib/aur/PKGBUILD contrib/aur/.SRCINFO /tmp/aur-repo/
           [ -f contrib/aur/z13gui-bin.install ] && cp contrib/aur/z13gui-bin.install /tmp/aur-repo/
           cd /tmp/aur-repo
@@ -127,8 +136,8 @@ jobs:
           git commit -m "Update to ${{ github.event.inputs.tag || github.ref_name }}"
           for i in 1 2 3; do
             git push && exit 0
-            echo "Push attempt $i failed, retrying in $((i * 5))s..."
-            sleep $((i * 5))
+            echo "Push attempt $i failed, retrying in ${i}0s..."
+            sleep $((i * 10))
           done
           echo "All push attempts failed"
           exit 1
