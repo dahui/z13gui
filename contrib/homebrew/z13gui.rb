@@ -6,8 +6,6 @@ class Z13gui < Formula
   license "Apache-2.0"
 
   depends_on :linux
-  depends_on "gtk4"
-  depends_on "gtk4-layer-shell"
   depends_on "z13ctl"
 
   def install
@@ -16,6 +14,13 @@ class Z13gui < Formula
 
   def caveats
     <<~EOS
+      z13gui requires GTK4 and gtk4-layer-shell installed via your system
+      package manager:
+
+        Arch:          sudo pacman -S gtk4 gtk4-layer-shell
+        Debian/Ubuntu: sudo apt install libgtk-4-1 libgtk4-layer-shell0
+        Fedora:        sudo dnf install gtk4 gtk4-layer-shell
+
       After installation, enable the z13gui service:
         systemctl --user enable --now z13gui
     EOS

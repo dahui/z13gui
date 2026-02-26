@@ -37,7 +37,7 @@ environment:
 ## Requirements
 
 - Wayland compositor with layer-shell support, or gamescope (Steam Gaming Mode)
-- `gtk4-layer-shell` library
+- GTK 4 and gtk4-layer-shell libraries (see [Installation](installation.md#runtime-dependencies) for distro package names)
 - [z13ctl](https://github.com/dahui/z13ctl) daemon running
 
 ---

@@ -6,6 +6,17 @@
 - Wayland compositor with layer-shell support, or gamescope (Steam Gaming Mode)
 - [z13ctl](https://github.com/dahui/z13ctl) installed and daemon running
 
+### Runtime dependencies
+
+z13gui links dynamically against GTK 4 and gtk4-layer-shell. The AUR package
+pulls these automatically; for other install methods, install them via your
+system package manager first.
+
+| Dependency | Arch | Debian / Ubuntu | Fedora |
+|---|---|---|---|
+| GTK 4 | `gtk4` | `libgtk-4-1` | `gtk4` |
+| gtk4-layer-shell | `gtk4-layer-shell` | `libgtk4-layer-shell0` | `gtk4-layer-shell` |
+
 ---
 
 ## Install
@@ -39,7 +50,8 @@
 
 === "Release binary"
 
-    Download the latest `linux_amd64` archive from the
+    Install the [runtime dependencies](#runtime-dependencies) for your distro,
+    then download the latest `linux_amd64` archive from the
     [Releases](https://github.com/dahui/z13gui/releases) page:
 
     ```sh
@@ -77,6 +89,12 @@
 
     ```sh
     sudo apt-get install -y libgtk-4-dev libgtk4-layer-shell-dev
+    ```
+
+    **Fedora:**
+
+    ```sh
+    sudo dnf install gtk4-devel gtk4-layer-shell-devel
     ```
 
     Then clone and build:
