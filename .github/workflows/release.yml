@@ -77,13 +77,14 @@ jobs:
 
           # Compute pkgrel: increment if same version already on AUR, else 1
           PKGREL=1
-          if git clone --depth 1 https://aur.archlinux.org/z13gui-bin.git /tmp/aur-pkg 2>/dev/null; then
-            AUR_VER=$(grep -oP '^pkgver=\K.*' /tmp/aur-pkg/PKGBUILD || true)
-            AUR_REL=$(grep -oP '^pkgrel=\K.*' /tmp/aur-pkg/PKGBUILD || true)
-            if [ "$AUR_VER" = "$VERSION" ] && [ -n "$AUR_REL" ]; then
-              PKGREL=$((AUR_REL + 1))
+          AUR_VER=$(curl -fsSL "https://aur.archlinux.org/rpc/v5/info?arg[]=z13gui-bin" \
+            | jq -r '.results[0].Version // empty')
+          if [ -n "$AUR_VER" ]; then
+            AUR_PKGVER="${AUR_VER%-*}"
+            AUR_PKGREL="${AUR_VER##*-}"
+            if [ "$AUR_PKGVER" = "$VERSION" ] && [ -n "$AUR_PKGREL" ]; then
+              PKGREL=$((AUR_PKGREL + 1))
             fi
-            rm -rf /tmp/aur-pkg
           fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -96,16 +97,41 @@ jobs:
           sed -i "s/PKGREL_PLACEHOLDER/${{ steps.meta.outputs.pkgrel }}/"  contrib/aur/PKGBUILD
           sed -i "s/SHA256_PLACEHOLDER/${{ steps.meta.outputs.sha256 }}/"  contrib/aur/PKGBUILD
 
-      - uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
-        with:
-          pkgname: z13gui-bin
-          pkgbuild: contrib/aur/PKGBUILD
-          assets: contrib/aur/z13gui-bin.install
-          commit_username: "z13gui Release Bot"
-          commit_email: "noreply@github.com"
-          ssh_private_key: ${{ secrets.AUR_KEY }}
-          commit_message: "Update to ${{ github.event.inputs.tag || github.ref_name }}"
-          force_push: true
+      - name: Generate .SRCINFO
+        run: |
+          docker run --rm -v "$PWD/contrib/aur:/pkg" -w /pkg archlinux:latest \
+            bash -c "pacman -Sy --noconfirm pacman-contrib && makepkg --printsrcinfo > .SRCINFO"
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AUR_KEY }}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519,ecdsa,rsa aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          cat >> ~/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            User aur
+          EOF
+
+      - name: Push to AUR
+        run: |
+          git clone ssh://aur@aur.archlinux.org/z13gui-bin.git /tmp/aur-repo
+          cp contrib/aur/PKGBUILD contrib/aur/.SRCINFO /tmp/aur-repo/
+          [ -f contrib/aur/z13gui-bin.install ] && cp contrib/aur/z13gui-bin.install /tmp/aur-repo/
+          cd /tmp/aur-repo
+          git config user.name "z13gui Release Bot"
+          git config user.email "noreply@github.com"
+          git add -A
+          git diff --cached --quiet && echo "No changes to push" && exit 0
+          git commit -m "Update to ${{ github.event.inputs.tag || github.ref_name }}"
+          for i in 1 2 3; do
+            git push && exit 0
+            echo "Push attempt $i failed, retrying in $((i * 5))s..."
+            sleep $((i * 5))
+          done
+          echo "All push attempts failed"
+          exit 1
 
   homebrew:
     needs: release
