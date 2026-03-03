@@ -15,11 +15,10 @@ import (
 )
 
 const (
-	animDuration    = 200 * time.Millisecond // slide animation duration
-	animGrace       = 300 * time.Millisecond // post-show grace before honouring dismiss
-	focusLossDelay  = 200                    // ms; confirmation delay before auto-hide
-	hiddenMarginPad = 80                     // extra px beyond drawerWidth for hidden margin
-	marginFraction  = 20                     // screen height / N for 5% top/bottom margins
+	animDuration   = 200 * time.Millisecond // slide animation duration
+	showSettleTime = 500 * time.Millisecond // ignore focus loss within this window after Show
+	focusLossDelay = 200                    // ms; confirmation delay before auto-hide
+	marginFraction = 20                     // screen height / N for 5% top/bottom margins
 )
 
 // Backend manages the layer-shell overlay drawer on Wayland compositors.
@@ -27,12 +26,15 @@ type Backend struct {
 	appWin *gtk.ApplicationWindow
 	gtkWin *gtk.Window
 
-	drawerWidth   int
-	hiddenMargin  int
-	margin        int    // current right margin: 0=on-screen, hiddenMargin=off-screen
-	animGen       uint64 // incremented to cancel in-flight animations
-	animating     bool   // true during show/hide animation; suppresses focus-loss dismiss
-	pointerInside bool   // true when pointer is over the drawer surface
+	drawerWidth      int
+	hiddenMargin     int
+	margin           int       // current right margin: 0=on-screen, hiddenMargin=1px visible
+	animGen          uint64    // incremented to cancel in-flight animations
+	animating        bool      // true during show/hide slide animation
+	pointerInside    bool      // true when pointer is over the drawer surface
+	showTime         time.Time // when Show() was last called; used to ignore early focus loss
+	focusedSinceShow bool      // true once compositor grants focus after Show()
+	startup          bool      // true until first Show() reveals the surface
 }
 
 // New creates a layer-shell backend. drawerWidth is the drawer panel width in pixels.
@@ -41,8 +43,9 @@ func New(appWin *gtk.ApplicationWindow, gtkWin *gtk.Window, drawerWidth int) *Ba
 		appWin:       appWin,
 		gtkWin:       gtkWin,
 		drawerWidth:  drawerWidth,
-		hiddenMargin: -(drawerWidth + hiddenMarginPad),
-		margin:       -(drawerWidth + hiddenMarginPad),
+		hiddenMargin: -(drawerWidth - 1),
+		margin:       -(drawerWidth - 1),
+		startup:      true,
 	}
 }
 
@@ -79,7 +82,28 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 
 	// Keep the window surface alive at all times; "hidden" = margin off-screen.
 	// This prevents KDE Plasma ghost-surface artifact on remap.
+	// Opacity starts at 0 so the surface is in KWin's composited output (for
+	// damage tracking) but invisible to the user. Show() sets opacity to 1.
 	b.appWin.SetVisible(true)
+	b.appWin.SetOpacity(0)
+
+	// After the surface is mapped, poll until the compositor configures the
+	// actual width (which may exceed drawerWidth due to CSS borders/styling).
+	// Once known, set hiddenMargin to -(actualWidth - 1) so exactly 1px remains
+	// on-screen. This keeps the surface in KWin's composited output and avoids
+	// a damage tracking gap that prevents rendering when launched via systemd.
+	b.appWin.Connect("map", func() {
+		glib.TimeoutAdd(16, func() bool {
+			w := b.gtkWin.Width()
+			if w <= 0 {
+				return true // compositor hasn't configured yet, retry
+			}
+			b.hiddenMargin = -(w - 1)
+			b.margin = b.hiddenMargin
+			gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeRight, b.hiddenMargin)
+			return false
+		})
+	})
 
 	// Track pointer position to distinguish spurious KDE focus drops from
 	// genuine click-outside. When KDE drops focus after rapid keyboard-mode
@@ -94,18 +118,24 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 	})
 	b.gtkWin.AddController(motion)
 
-	// Hide when the window loses focus, but only if the pointer is outside
-	// the drawer (genuine click-outside). Ignore focus drops when the pointer
-	// is inside (spurious KDE Plasma focus revocation).
+	// Hide when the window loses focus, but only if:
+	//   - focus was actually received since the last Show (focusedSinceShow)
+	//   - enough time has passed since Show for the compositor to settle (showSettleTime)
+	//   - pointer is outside the drawer (genuine click-outside, not spurious KDE drop)
 	b.appWin.Connect("notify::is-active", func() {
 		active := b.appWin.IsActive()
 		vis := isVisible()
-		slog.Debug("focus changed", "is-active", active, "visible", vis, "pointerInside", b.pointerInside)
-		if active || !vis {
+		slog.Debug("focus changed", "is-active", active, "visible", vis,
+			"focusedSinceShow", b.focusedSinceShow, "pointerInside", b.pointerInside)
+		if active {
+			b.focusedSinceShow = true
 			return
 		}
-		if b.animating {
-			slog.Debug("focus lost during animation, ignoring")
+		if !vis || !b.focusedSinceShow {
+			return
+		}
+		if time.Since(b.showTime) < showSettleTime {
+			slog.Debug("focus lost too soon after show, ignoring")
 			return
 		}
 		if b.pointerInside {
@@ -114,8 +144,8 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 		}
 		slog.Debug("focus lost with pointer outside, dismissing after delay")
 		glib.TimeoutAdd(focusLossDelay, func() bool {
-			if !isVisible() || b.appWin.IsActive() || b.animating {
-				slog.Debug("dismiss cancelled: hidden, refocused, or animating")
+			if !isVisible() || b.appWin.IsActive() {
+				slog.Debug("dismiss cancelled: hidden or refocused")
 				return false
 			}
 			slog.Debug("dismiss confirmed: focus still lost")
@@ -147,40 +177,28 @@ func (b *Backend) WrapContent(drawer gtk.Widgetter) gtk.Widgetter {
 // Show starts the slide-in animation using a smoothstep easing curve.
 func (b *Backend) Show() {
 	slog.Debug("backend.Show", "startMargin", b.margin)
+	if b.startup {
+		b.appWin.SetOpacity(1)
+		b.startup = false
+	}
+	b.showTime = time.Now()
+	b.focusedSinceShow = false
+
 	gtk4layershell.SetKeyboardMode(b.gtkWin, gtk4layershell.LayerShellKeyboardModeOnDemand)
-
-	var gen uint64
-	gen = b.slideMargin(0, func() {
-		b.appWin.Present()
-
-		// Keep animating guard active for a grace period after show completes.
-		// KDE Plasma's async keyboard-mode handling can send delayed focus
-		// revocations after SetKeyboardMode(OnDemand); the grace period lets
-		// the compositor settle before we honour dismiss events.
-		glib.TimeoutAdd(uint(animGrace.Milliseconds()), func() bool {
-			if b.animGen == gen {
-				b.animating = false
-				b.appWin.Present()
-			}
-			return false
-		})
+	b.slideMargin(0, func() {
+		b.animating = false
 	})
-
 	b.appWin.Present()
 }
 
 // Hide starts the slide-out animation.
 func (b *Backend) Hide() {
 	slog.Debug("backend.Hide", "startMargin", b.margin)
-
-	// Clear GTK's internal focused-widget state before relinquishing keyboard
-	// interactivity. Without this, GTK retains a stale focus reference that
-	// prevents the compositor from cleanly re-granting focus on the next Show().
-	b.gtkWin.SetFocus(nil)
-
+	if w := b.gtkWin.Width(); w > 0 {
+		b.hiddenMargin = -(w - 1)
+	}
 	gtk4layershell.SetKeyboardMode(b.gtkWin, gtk4layershell.LayerShellKeyboardModeNone)
 	b.pointerInside = false // clear stale state; surface stays mapped off-screen
-
 	b.slideMargin(b.hiddenMargin, func() {
 		b.animating = false
 	})
@@ -190,6 +208,11 @@ func (b *Backend) Hide() {
 // animDuration using smoothstep easing. onDone is called on the main thread
 // when the animation completes (or nil to skip). Returns the animation
 // generation for use in post-completion callbacks.
+//
+// Uses AddTickCallback (GTK4's proper animation mechanism) instead of
+// glib.TimeoutAdd. Tick callbacks fire in the frame clock's UPDATE phase,
+// synchronized with the compositor's VSync, so margin changes and surface
+// commits happen in the same frame cycle.
 func (b *Backend) slideMargin(target int, onDone func()) uint64 {
 	b.animGen++
 	gen := b.animGen
@@ -197,7 +220,7 @@ func (b *Backend) slideMargin(target int, onDone func()) uint64 {
 	start := b.margin
 	t0 := time.Now()
 
-	glib.TimeoutAdd(16, func() bool {
+	b.gtkWin.AddTickCallback(func(_ gtk.Widgetter, _ gdk.FrameClocker) bool {
 		if b.animGen != gen {
 			slog.Debug("anim cancelled", "gen", gen, "currentGen", b.animGen)
 			return false
@@ -206,6 +229,7 @@ func (b *Backend) slideMargin(target int, onDone func()) uint64 {
 		if t >= 1.0 {
 			b.margin = target
 			gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeRight, target)
+			b.invalidateSurface()
 			slog.Debug("anim complete", "gen", gen, "margin", target)
 			if onDone != nil {
 				onDone()
@@ -215,8 +239,18 @@ func (b *Backend) slideMargin(target int, onDone func()) uint64 {
 		t = t * t * (3 - 2*t) // smoothstep
 		b.margin = start + int(math.Round(float64(target-start)*t))
 		gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeRight, b.margin)
+		b.invalidateSurface()
 		return true
 	})
 
 	return gen
+}
+
+// invalidateSurface forces both widget-level and GDK surface-level
+// invalidation to maximize the chance the compositor notices changes.
+func (b *Backend) invalidateSurface() {
+	b.gtkWin.QueueDraw()
+	if s := b.appWin.Surface(); s != nil {
+		gdk.BaseSurface(s).QueueRender()
+	}
 }
