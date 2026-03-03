@@ -39,6 +39,12 @@ sudo pacman -S gtk4 gtk4-layer-shell
 sudo apt-get install -y libgtk-4-dev libgtk4-layer-shell-dev
 ```
 
+**Build dependencies (Fedora):**
+
+```sh
+sudo dnf install gtk4-devel gtk4-layer-shell-devel
+```
+
 To work against a local copy of the z13ctl API module, create a `go.work` file
 (it is gitignored):
 
@@ -80,5 +86,5 @@ should include tests for any changes to `internal/theme`.
 git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
-GoReleaser handles binary builds, the Arch `.pkg.tar.zst` package, and GitHub
-Release creation automatically when the tag is pushed.
+GoReleaser handles binary builds, the `.pkg.tar.zst`, `.deb`, and `.rpm`
+packages, and GitHub Release creation automatically when the tag is pushed.

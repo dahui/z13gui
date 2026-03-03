@@ -21,33 +21,6 @@ system package manager first.
 
 ## Install
 
-=== "Arch Linux (AUR)"
-
-    ```sh
-    paru -S z13gui-bin
-    ```
-
-    Or with yay:
-
-    ```sh
-    yay -S z13gui-bin
-    ```
-
-    The package installs the binary, systemd service, udev rules, and desktop entry.
-    Services are enabled automatically for all users on next login.
-
-=== "Linuxbrew"
-
-    ```sh
-    brew install dahui/z13ctl/z13gui
-    ```
-
-    Then enable the systemd service:
-
-    ```sh
-    systemctl --user enable --now z13gui
-    ```
-
 === "Release binary"
 
     Install the [runtime dependencies](#runtime-dependencies) for your distro,
@@ -73,6 +46,72 @@ system package manager first.
     ```sh
     install -Dm644 contrib/z13gui.desktop \
         ~/.local/share/applications/z13gui.desktop
+    ```
+
+=== "Arch Linux (AUR)"
+
+    Install the [z13gui-bin](https://aur.archlinux.org/packages/z13gui-bin)
+    package with your preferred AUR helper:
+
+    ```sh
+    yay -S z13gui-bin
+    ```
+
+    The package installs the binary, systemd service, udev rules, and desktop
+    entry. Services are enabled automatically for all users on next login.
+
+    Alternatively, download the `.pkg.tar.zst` package directly from the
+    [Releases](https://github.com/dahui/z13gui/releases) page and install with
+    pacman:
+
+    ```sh
+    sudo pacman -U z13gui-*.pkg.tar.zst
+    ```
+
+=== "Debian / Ubuntu"
+
+    Download the `.deb` package from the
+    [Releases](https://github.com/dahui/z13gui/releases) page, then install:
+
+    ```sh
+    sudo apt install ./z13gui_*.deb
+    ```
+
+    The package installs the binary, systemd service, udev rules, and desktop
+    entry. After installing, enable the service:
+
+    ```sh
+    systemctl --user enable --now z13gui
+    ```
+
+=== "Fedora / RHEL"
+
+    Download the `.rpm` package from the
+    [Releases](https://github.com/dahui/z13gui/releases) page, then install:
+
+    ```sh
+    sudo dnf install ./z13gui_*.rpm
+    ```
+
+    The package installs the binary, systemd service, udev rules, and desktop
+    entry. After installing, enable the service:
+
+    ```sh
+    systemctl --user enable --now z13gui
+    ```
+
+=== "Homebrew (Linuxbrew)"
+
+    ```sh
+    brew install dahui/z13ctl/z13gui
+    ```
+
+    Homebrew installs only the binary. Install the
+    [runtime dependencies](#runtime-dependencies) via your system package
+    manager, then enable the systemd service:
+
+    ```sh
+    systemctl --user enable --now z13gui
     ```
 
 === "From source"

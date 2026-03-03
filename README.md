@@ -13,16 +13,26 @@ communication goes through the z13ctl daemon.
 
 ## Install
 
-Download the latest `linux_amd64` archive from the
-[Releases](../../releases) page:
-
 ```sh
+# Arch Linux (AUR)
+yay -S z13gui-bin
+
+# Debian / Ubuntu
+sudo apt install ./z13gui_*.deb
+
+# Fedora / RHEL
+sudo dnf install ./z13gui_*.rpm
+
+# Homebrew (Linuxbrew)
+brew install dahui/z13ctl/z13gui
+
+# Manual (from release tarball)
 tar xzf z13gui_*_linux_amd64.tar.gz
 sudo install -Dm755 z13gui /usr/local/bin/z13gui
 ```
 
 See the [Installation guide](https://dahui.github.io/z13gui/installation/) for
-AUR, Linuxbrew, source builds, and systemd service setup.
+systemd service setup, source builds, and uninstall instructions.
 
 ## Quick Start
 
