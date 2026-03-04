@@ -39,3 +39,6 @@ z13gui
 go.work
 go.work.sum
 site/
+
+# BPF generated kernel BTF (machine-specific, only needed for go generate)
+internal/gui/gamepad/hidblocker/vmlinux.h

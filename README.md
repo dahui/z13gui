@@ -23,9 +23,6 @@ sudo apt install ./z13gui_*.deb
 # Fedora / RHEL
 sudo dnf install ./z13gui_*.rpm
 
-# Homebrew (Linuxbrew)
-brew install dahui/z13ctl/z13gui
-
 # Manual (from release tarball)
 tar xzf z13gui_*_linux_amd64.tar.gz
 sudo install -Dm755 z13gui /usr/local/bin/z13gui

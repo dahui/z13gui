@@ -91,8 +91,9 @@ type Window struct {
 	customColors  theme.Colors
 	customAccents []theme.Accent
 
-	// Steam process freeze (gamescope only).
-	steamPID int
+	// Steam input suppression (gamescope only).
+	steamBlocker gamepad.SteamInputBlocker
+	steamPID     int
 
 	// Gamepad focus navigation.
 	gamepadReader     *gamepad.Reader
@@ -129,6 +130,10 @@ func New(app *gtk.Application) *Window {
 	}
 
 	w.backend.Configure(func() bool { return w.visible }, w.hide)
+
+	if w.gamescope {
+		w.steamBlocker = gamepad.NewSteamInputBlocker()
+	}
 
 	// Register embedded Inter font before loading CSS so font-family resolves.
 	fonts.Register()
@@ -217,16 +222,8 @@ func (w *Window) show() {
 	if w.gamepadReader != nil {
 		go w.gamepadReader.GrabAll()
 	}
-	if w.gamescope {
-		w.steamPID = gamepad.FindSteamPID()
-		if w.steamPID > 0 {
-			if err := gamepad.FreezeProc(w.steamPID); err != nil {
-				slog.Warn("steam: freeze failed", "pid", w.steamPID, "err", err)
-				w.steamPID = 0
-			} else {
-				slog.Info("steam: frozen", "pid", w.steamPID)
-			}
-		}
+	if w.steamBlocker != nil {
+		w.steamPID = w.steamBlocker.BlockSteam()
 	}
 	w.backend.Show()
 }
@@ -236,19 +233,14 @@ func (w *Window) show() {
 func (w *Window) hide() {
 	slog.Debug("hide called", "wasVisible", w.visible)
 	w.visible = false
-	// Delay thaw + ungrab so the dismiss button is released before Steam
-	// resumes input processing. The evdev grab stays held during the delay
-	// to prevent any input from reaching Steam's readers.
-	if w.gamescope && w.steamPID > 0 {
+	// Delay unblock + ungrab so the dismiss button release is consumed before
+	// Steam resumes input processing.
+	if w.steamBlocker != nil && w.steamPID > 0 {
 		pid := w.steamPID
 		w.steamPID = 0
 		go func() {
 			time.Sleep(200 * time.Millisecond)
-			if err := gamepad.ThawProc(pid); err != nil {
-				slog.Warn("steam: thaw failed", "pid", pid, "err", err)
-			} else {
-				slog.Info("steam: thawed", "pid", pid)
-			}
+			w.steamBlocker.UnblockSteam(pid)
 			if w.gamepadReader != nil {
 				w.gamepadReader.UngrabAll()
 			}

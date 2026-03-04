@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/dahui/z13gui/internal/gui/gamepad/hidblocker"
 )
 
 // pidFilePath returns the path to the frozen-PID state file.
@@ -78,4 +80,126 @@ func ThawFrozen() {
 	_ = syscall.Kill(pid, syscall.SIGCONT)
 	_ = os.Remove(pidFilePath())
 	slog.Info("steam: thawed frozen process on cleanup", "pid", pid)
+}
+
+// SteamInputBlocker suppresses PS/Nintendo controller input from reaching
+// Steam while the overlay is visible. Two implementations:
+//   - bpfBlocker: BPF LSM blocks hidraw reads (preferred, no side effects)
+//   - sigstopBlocker: SIGSTOP freezes Steam (fallback, freezes games too)
+type SteamInputBlocker interface {
+	BlockSteam() int
+	UnblockSteam(pid int)
+	Close()
+}
+
+// NewSteamInputBlocker creates a SteamInputBlocker. Tries BPF LSM first
+// (zero side effects), falls back to SIGSTOP (freezes Steam + games).
+func NewSteamInputBlocker() SteamInputBlocker {
+	hb, err := hidblocker.New()
+	if err != nil {
+		slog.Info("steam: BPF LSM unavailable, using SIGSTOP fallback", "err", err)
+		return &sigstopBlocker{}
+	}
+	slog.Info("steam: using BPF LSM hidraw blocker")
+	return &bpfBlocker{hb: hb}
+}
+
+// --- BPF implementation ---
+
+type bpfBlocker struct {
+	hb *hidblocker.Blocker
+}
+
+func (b *bpfBlocker) BlockSteam() int {
+	pid := FindSteamPID()
+	if pid == 0 {
+		return 0
+	}
+	if err := b.hb.Block(pid); err != nil {
+		slog.Warn("steam: BPF block failed", "pid", pid, "err", err)
+		return 0
+	}
+	slog.Info("steam: BPF blocked", "pid", pid)
+	for _, child := range findChildren(pid) {
+		if err := b.hb.Block(child); err != nil {
+			slog.Warn("steam: BPF block child failed", "pid", child, "err", err)
+		} else {
+			slog.Info("steam: BPF blocked child", "pid", child)
+		}
+	}
+	return pid
+}
+
+func (b *bpfBlocker) UnblockSteam(pid int) {
+	if pid == 0 {
+		return
+	}
+	b.hb.UnblockAll()
+	slog.Info("steam: BPF unblocked", "pid", pid)
+}
+
+func (b *bpfBlocker) Close() {
+	b.hb.Close()
+}
+
+// --- SIGSTOP fallback ---
+
+type sigstopBlocker struct{}
+
+func (s *sigstopBlocker) BlockSteam() int {
+	pid := FindSteamPID()
+	if pid == 0 {
+		return 0
+	}
+	if err := FreezeProc(pid); err != nil {
+		slog.Warn("steam: freeze failed", "pid", pid, "err", err)
+		return 0
+	}
+	slog.Info("steam: frozen", "pid", pid)
+	return pid
+}
+
+func (s *sigstopBlocker) UnblockSteam(pid int) {
+	if pid == 0 {
+		return
+	}
+	if err := ThawProc(pid); err != nil {
+		slog.Warn("steam: thaw failed", "pid", pid, "err", err)
+	} else {
+		slog.Info("steam: thawed", "pid", pid)
+	}
+}
+
+func (s *sigstopBlocker) Close() {}
+
+// findChildren returns PIDs of all direct child processes of ppid.
+func findChildren(ppid int) []int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	ppidStr := strconv.Itoa(ppid)
+	var children []int
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil || pid == ppid {
+			continue
+		}
+		data, err := os.ReadFile("/proc/" + e.Name() + "/status")
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "PPid:\t") {
+				if strings.TrimPrefix(line, "PPid:\t") == ppidStr {
+					children = append(children, pid)
+				}
+				break
+			}
+		}
+	}
+	return children
 }

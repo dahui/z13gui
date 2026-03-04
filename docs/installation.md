@@ -100,20 +100,6 @@ system package manager first.
     systemctl --user enable --now z13gui
     ```
 
-=== "Homebrew (Linuxbrew)"
-
-    ```sh
-    brew install dahui/z13ctl/z13gui
-    ```
-
-    Homebrew installs only the binary. Install the
-    [runtime dependencies](#runtime-dependencies) via your system package
-    manager, then enable the systemd service:
-
-    ```sh
-    systemctl --user enable --now z13gui
-    ```
-
 === "From source"
 
     Requires Go 1.23+, CGO enabled, and GTK4 development libraries.
@@ -145,6 +131,71 @@ system package manager first.
     sudo make install
     make install-service
     ```
+
+---
+
+## Gamepad input blocking (capabilities)
+
+In Steam Gaming Mode (gamescope), z13gui suppresses controller input while the
+drawer is open so button presses navigate the overlay instead of the game.
+
+z13gui supports two blocking methods and selects the best one automatically:
+
+| Method | Requires | Behaviour | Side effects |
+|--------|----------|-----------|--------------|
+| **BPF blocker** (preferred) | `CAP_BPF` + `CAP_PERFMON` on the binary | Blocks PS / Nintendo controller reads at the kernel level via a BPF LSM hook | None — Steam and the game keep running normally |
+| **SIGSTOP fallback** | No extra capabilities | Pauses the Steam process with SIGSTOP / SIGCONT | Game also pauses; PipeWire frame delivery stops |
+
+The AUR, `.deb`, and `.rpm` packages grant the required capabilities
+automatically during installation. If you installed from source or from the
+release binary, grant them manually:
+
+```sh
+sudo setcap cap_bpf,cap_perfmon+ep /usr/local/bin/z13gui
+```
+
+??? note "What are these capabilities and are they safe?"
+
+    ### Short version
+
+    These two capabilities let z13gui load a tiny kernel filter that tells
+    the system "when Steam tries to read a PS or Nintendo controller, return
+    a temporary 'try again later' error instead." That's all it does. It
+    cannot access your files, network, or any other part of the system. The
+    filter is automatically removed when z13gui exits.
+
+    ### Technical details
+
+    **CAP_BPF** allows loading BPF programs into the kernel. z13gui uses
+    this to attach a single LSM (`lsm/file_permission`) hook that
+    intercepts `read()` calls on hidraw character devices
+    (`/dev/hidraw*`). The hook checks whether the calling PID is in a
+    small allow-list map and the target device is a hidraw device
+    (major 244). If both conditions match, it returns `-EAGAIN`; otherwise
+    it returns `0` (allow).
+
+    **CAP_PERFMON** is required by the kernel to attach BPF LSM programs.
+    z13gui does not use performance monitoring — this capability is a
+    kernel-imposed prerequisite for LSM attachment.
+
+    **What the BPF program can do:**
+
+    - Return `-EAGAIN` for `read()` calls on hidraw devices by specific PIDs
+    - Nothing else — the program is verified by the kernel's BPF verifier
+      before loading and cannot be modified at runtime
+
+    **What the BPF program cannot do:**
+
+    - Access files, network, or memory outside its own BPF maps
+    - Survive a process exit — all BPF resources are released when z13gui
+      stops, crashes, or is killed
+    - Affect any process not explicitly added to its PID map
+    - Block any operation other than `read()` on hidraw devices
+
+    **Compared to running as root:** file capabilities grant only the two
+    listed privileges to the z13gui binary. The process runs as your normal
+    user with no other elevated access. This is strictly safer than running
+    with `sudo` or as root.
 
 ---
 
@@ -206,6 +257,17 @@ Run with debug logging to see GTK and initialization output:
 ```sh
 z13gui --debug
 ```
+
+**Gamescope: controller input not suppressed while drawer is open**
+
+Grant BPF capabilities so z13gui can block controller input at the kernel level:
+
+```sh
+sudo setcap cap_bpf,cap_perfmon+ep /usr/local/bin/z13gui
+```
+
+Without capabilities, z13gui falls back to freezing Steam (SIGSTOP), which
+also pauses running games.
 
 **Gamescope: drawer doesn't show**
 

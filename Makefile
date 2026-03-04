@@ -2,7 +2,9 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 LDFLAGS  := -s -w -X main.Version=$(VERSION)
 PREFIX   ?= /usr/local
 
-.PHONY: build test cover lint mod-tidy snapshot release install install-service uninstall-service install-desktop clean help
+HIDBLOCKER_DIR := internal/gui/gamepad/hidblocker
+
+.PHONY: build test cover lint mod-tidy vmlinux generate snapshot release install setcap install-service uninstall-service install-desktop clean help
 
 ## build: compile z13gui (CGO required for GTK4)
 build:
@@ -25,6 +27,16 @@ lint:
 mod-tidy:
 	go mod tidy
 
+## vmlinux: generate vmlinux.h from kernel BTF (requires bpftool)
+vmlinux: $(HIDBLOCKER_DIR)/vmlinux.h
+
+$(HIDBLOCKER_DIR)/vmlinux.h:
+	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@
+
+## generate: compile BPF program and generate Go bindings (requires clang)
+generate: vmlinux
+	cd $(HIDBLOCKER_DIR) && go generate
+
 ## snapshot: build a local snapshot release via goreleaser (no publish)
 snapshot:
 	goreleaser release --snapshot --clean
@@ -37,6 +49,10 @@ release:
 install:
 	@test -f z13gui || { echo "error: z13gui binary not found. Run 'make build' first."; exit 1; }
 	install -Dm755 z13gui $(DESTDIR)$(PREFIX)/bin/z13gui
+
+## setcap: grant BPF capabilities to installed binary (enables hidraw blocker)
+setcap:
+	sudo setcap cap_bpf,cap_perfmon+ep $(DESTDIR)$(PREFIX)/bin/z13gui
 
 ## install-service: install and enable the z13gui systemd user service
 install-service:
