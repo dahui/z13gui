@@ -330,6 +330,8 @@ func (w *Window) ensureVisible(widget gtk.Widgetter) {
 			scroll = w.mainScroll
 		case "theme":
 			scroll = w.themeScroll
+		case "custom":
+			scroll = w.customScroll
 		default:
 			return // color view has no scroll
 		}

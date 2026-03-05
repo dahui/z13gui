@@ -50,19 +50,45 @@ type Window struct {
 	// Widget references for syncState.
 	tabKB           *gtk.CheckButton
 	tabLB           *gtk.CheckButton
-	modeButtons     map[string]*gtk.CheckButton
+	modeButtons     map[string]*gtk.Button
 	color1          *colorInput
 	color2          *colorInput
 	color1Box       *gtk.Box // COLOR 1 label + row — visibility toggled by syncModeVis
 	color2Box       *gtk.Box // COLOR 2 label + row — visibility toggled by syncModeVis
 	speedBox        *gtk.Box // SPEED label + row — visibility toggled by syncModeVis
 	brightBox       *gtk.Box // BRIGHTNESS label + scale — hidden when mode is "off"
-	speedBtns       map[string]*gtk.CheckButton
+	speedBtns       map[string]*gtk.Button
 	brightScale     *gtk.Scale
-	profileBtns     map[string]*gtk.CheckButton
+	profileBtns     map[string]*gtk.Button
 	battScale       *gtk.Scale
 	overdriveSwitch *gtk.Switch
 	bootSoundSwitch *gtk.Switch
+
+	// Custom profile view.
+	customScroll       *gtk.ScrolledWindow
+	customBackBtn      *gtk.Button
+	tdpBasicScale      *gtk.Scale
+	tdpBasicLabel      *gtk.Label
+	tdpAdvancedCheck   *gtk.CheckButton
+	tdpAdvancedBox     *gtk.Box
+	tdpPL1Scale        *gtk.Scale
+	tdpPL2Scale        *gtk.Scale
+	tdpPL3Scale        *gtk.Scale
+	tdpPL1Label        *gtk.Label
+	tdpPL2Label        *gtk.Label
+	tdpPL3Label        *gtk.Label
+	tdpWarningLabel    *gtk.Label
+	fanCurve           *fanCurveEditor
+	saveTdpBtn  *gtk.Button
+	saveFanBtn  *gtk.Button
+	saveBothBtn *gtk.Button
+	resetTdpBtn *gtk.Button
+	resetFanBtn *gtk.Button
+	headerTelemetry    *gtk.Label // "45°C · 3200 RPM" in main header
+	telemetryTempLabel *gtk.Label
+	telemetryFanLabel  *gtk.Label
+	telemetryGen       int
+	customFocusItems   []focusItem
 
 	syncing    bool        // true while syncState is updating widgets; suppresses sendApply
 	applyTimer *time.Timer // debounce for continuous inputs (brightness, color wheel)
@@ -113,9 +139,9 @@ func New(app *gtk.Application) *Window {
 	w := &Window{
 		tab:         "keyboard",
 		gamescope:   os.Getenv("GAMESCOPE_WAYLAND_DISPLAY") != "",
-		modeButtons: make(map[string]*gtk.CheckButton),
-		speedBtns:   make(map[string]*gtk.CheckButton),
-		profileBtns: make(map[string]*gtk.CheckButton),
+		modeButtons: make(map[string]*gtk.Button),
+		speedBtns:   make(map[string]*gtk.Button),
+		profileBtns: make(map[string]*gtk.Button),
 	}
 
 	w.win = gtk.NewApplicationWindow(app)
@@ -226,6 +252,7 @@ func (w *Window) show() {
 		w.steamPID = w.steamBlocker.BlockSteam()
 	}
 	w.backend.Show()
+	w.startTelemetryPolling()
 }
 
 // hide delegates to the display backend. Resets to main view so the drawer
@@ -249,6 +276,7 @@ func (w *Window) hide() {
 		go w.gamepadReader.UngrabAll()
 	}
 	w.hideGamepadFocus()
+	w.telemetryGen++ // stop any running telemetry poll
 	if w.viewStack != nil {
 		w.viewStack.SetVisibleChildName("main")
 		w.swapFocusList(w.mainFocusItems)
