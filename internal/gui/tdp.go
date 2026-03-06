@@ -405,7 +405,7 @@ func (w *Window) buildCustomView() *gtk.Box {
 	w.tdpBasicScale.SetValue(float64(50))
 	w.tdpBasicScale.SetFocusable(false)
 	w.tdpBasicLabel = gtk.NewLabel("50 W")
-	w.tdpBasicLabel.AddCSSClass("section-label")
+	w.tdpBasicLabel.AddCSSClass("scale-value")
 	w.tdpBasicScale.ConnectValueChanged(func() {
 		w.tdpBasicLabel.SetLabel(fmt.Sprintf("%d W", int(w.tdpBasicScale.Value())))
 	})
@@ -426,6 +426,40 @@ func (w *Window) buildCustomView() *gtk.Box {
 	w.tdpPL1Scale, w.tdpPL1Label = w.buildTdpScale("PL1 (SPL)")
 	w.tdpPL2Scale, w.tdpPL2Label = w.buildTdpScale("PL2 (SPPT)")
 	w.tdpPL3Scale, w.tdpPL3Label = w.buildTdpScale("PL3 (FPPT)")
+
+	// --- UNDERVOLT (inside advanced box) ---
+	w.uvBox = gtk.NewBox(gtk.OrientationVertical, 4)
+	// Hidden by default; syncCustomView shows it when UndervoltAvailable.
+	w.uvBox.SetVisible(false)
+
+	w.uvBox.Append(sectionLabel("UNDERVOLT"))
+
+	uvWarn := gtk.NewLabel("Undervolt offsets are only active while the Custom profile is selected. Switching to a stock profile resets them to 0. Unstable values may cause crashes.")
+	uvWarn.SetWrap(true)
+	uvWarn.SetHAlign(gtk.AlignStart)
+	uvWarn.AddCSSClass("tdp-warning")
+	w.uvBox.Append(uvWarn)
+
+	w.uvCpuScale, w.uvCpuLabel = w.buildUvScale("CPU Curve Optimizer", -40, 0)
+	w.uvIgpuScale, w.uvIgpuLabel = w.buildUvScale("iGPU Curve Optimizer", -30, 0)
+
+	// UV buttons: Save UV | Reset UV
+	uvBtnRow := gtk.NewBox(gtk.OrientationHorizontal, 4)
+	uvBtnRow.AddCSSClass("custom-actions")
+
+	w.saveUvBtn = gtk.NewButtonWithLabel("Save UV")
+	w.saveUvBtn.AddCSSClass("save-btn")
+	w.saveUvBtn.SetHExpand(true)
+	w.saveUvBtn.ConnectClicked(func() { w.saveUndervolt() })
+	uvBtnRow.Append(w.saveUvBtn)
+
+	w.resetUvBtn = gtk.NewButtonWithLabel("Reset UV")
+	w.resetUvBtn.SetHExpand(true)
+	w.resetUvBtn.ConnectClicked(func() { w.resetUndervolt() })
+	uvBtnRow.Append(w.resetUvBtn)
+
+	w.uvBox.Append(uvBtnRow)
+	w.tdpAdvancedBox.Append(w.uvBox)
 
 	content.Append(w.tdpAdvancedBox)
 
@@ -498,20 +532,52 @@ func (w *Window) buildCustomView() *gtk.Box {
 // buildTdpScale creates a labeled TDP slider (5–93W) and appends it to the
 // advanced box. Returns the scale and value label.
 func (w *Window) buildTdpScale(label string) (*gtk.Scale, *gtk.Label) {
-	w.tdpAdvancedBox.Append(sectionLabel(label))
+	nameLabel := gtk.NewLabel(label)
+	nameLabel.SetHAlign(gtk.AlignStart)
+	nameLabel.AddCSSClass("scale-name")
+	w.tdpAdvancedBox.Append(nameLabel)
 	sc := gtk.NewScaleWithRange(gtk.OrientationHorizontal, tdpMin, tdpMaxAdvanced, 1)
 	sc.SetDigits(0)
 	sc.SetDrawValue(false)
 	sc.SetValue(50)
 	sc.SetFocusable(false)
 	valLabel := gtk.NewLabel("50 W")
-	valLabel.AddCSSClass("section-label")
+	valLabel.AddCSSClass("scale-value")
 	sc.ConnectValueChanged(func() {
 		valLabel.SetLabel(fmt.Sprintf("%d W", int(sc.Value())))
 	})
 	w.tdpAdvancedBox.Append(sc)
 	w.tdpAdvancedBox.Append(valLabel)
 	return sc, valLabel
+}
+
+// buildUvScale creates a labeled undervolt slider and appends it to uvBox.
+func (w *Window) buildUvScale(label string, lo, hi float64) (*gtk.Scale, *gtk.Label) {
+	nameLabel := gtk.NewLabel(label)
+	nameLabel.SetHAlign(gtk.AlignStart)
+	nameLabel.AddCSSClass("scale-name")
+	w.uvBox.Append(nameLabel)
+	sc := gtk.NewScaleWithRange(gtk.OrientationHorizontal, lo, hi, 1)
+	sc.SetDigits(0)
+	sc.SetDrawValue(false)
+	sc.SetValue(0)
+	sc.SetFocusable(false)
+	valLabel := gtk.NewLabel(uvLabel(label, 0))
+	valLabel.AddCSSClass("scale-value")
+	sc.ConnectValueChanged(func() {
+		valLabel.SetLabel(uvLabel(label, int(sc.Value())))
+	})
+	w.uvBox.Append(sc)
+	w.uvBox.Append(valLabel)
+	return sc, valLabel
+}
+
+// uvLabel formats an undervolt value label, e.g. "CPU Curve Optimizer: -20" or "... 0 (stock)".
+func uvLabel(name string, val int) string {
+	if val == 0 {
+		return fmt.Sprintf("%s: 0 (stock)", name)
+	}
+	return fmt.Sprintf("%s: %d", name, val)
 }
 
 // syncCustomView populates the custom view widgets from daemon state.
@@ -552,6 +618,24 @@ func (w *Window) syncCustomView() {
 	if w.state.FanCurve != nil && len(w.state.FanCurve.Points) == 8 && w.fanCurve != nil {
 		copy(w.fanCurve.points[:], w.state.FanCurve.Points)
 		w.fanCurve.area.QueueDraw()
+	}
+
+	// Undervolt.
+	if w.uvBox != nil {
+		w.uvBox.SetVisible(w.state.UndervoltAvailable)
+	}
+	cpuCO, igpuCO := 0, 0
+	if w.state.Undervolt != nil && w.state.Profile == "custom" {
+		cpuCO = w.state.Undervolt.CPUCO
+		igpuCO = w.state.Undervolt.IGPUCO
+	}
+	if w.uvCpuScale != nil {
+		w.uvCpuScale.SetValue(float64(cpuCO))
+		w.uvCpuLabel.SetLabel(uvLabel("CPU Curve Optimizer", cpuCO))
+	}
+	if w.uvIgpuScale != nil {
+		w.uvIgpuScale.SetValue(float64(igpuCO))
+		w.uvIgpuLabel.SetLabel(uvLabel("iGPU Curve Optimizer", igpuCO))
 	}
 
 	// Telemetry.
@@ -685,6 +769,41 @@ func (w *Window) resetFanCurve() {
 	}()
 }
 
+// saveUndervolt commits the current Curve Optimizer offsets to the daemon.
+func (w *Window) saveUndervolt() {
+	go func() {
+		cpu := fmt.Sprintf("%d", int(w.uvCpuScale.Value()))
+		igpu := fmt.Sprintf("%d", int(w.uvIgpuScale.Value()))
+		if _, err := api.SendUndervoltSet(cpu, igpu); err != nil {
+			slog.Warn("undervolt set failed", "err", err)
+			return
+		}
+		slog.Info("undervolt saved", "cpu", cpu, "igpu", igpu)
+		w.refreshProfile()
+	}()
+}
+
+// resetUndervolt resets Curve Optimizer to stock (0).
+func (w *Window) resetUndervolt() {
+	go func() {
+		if _, err := api.SendUndervoltReset(); err != nil {
+			slog.Warn("undervolt reset failed", "err", err)
+			return
+		}
+		slog.Info("undervolt reset to stock")
+		ok, state, err := api.SendGetState()
+		if ok && err == nil {
+			glib.IdleAdd(func() {
+				w.state = state
+				w.syncCustomView()
+				w.syncing = true
+				w.syncProfile()
+				w.syncing = false
+			})
+		}
+	}()
+}
+
 // startTelemetryPolling begins polling the daemon for APU temp and fan RPM
 // every second while the drawer is visible. Updates the header telemetry
 // label on all views, and also updates custom view labels + fan curve
@@ -787,31 +906,60 @@ func (w *Window) buildCustomFocusList() {
 		})
 	}
 
-	// Row 7: save buttons.
+	// Rows 7-9: undervolt (visible only when available).
+	uvVis := func() bool { return w.tdpAdvancedBox.IsVisible() && w.uvBox != nil && w.uvBox.IsVisible() }
+	if w.uvCpuScale != nil {
+		oL, oR, gV, sV := scaleAdjust(w.uvCpuScale, 1)
+		items = append(items, focusItem{
+			widget: w.uvCpuScale, row: 7, col: 0,
+			section: "undervolt", editable: true, isVisible: uvVis,
+			onLeft: oL, onRight: oR, getValue: gV, setValue: sV,
+		})
+	}
+	if w.uvIgpuScale != nil {
+		oL, oR, gV, sV := scaleAdjust(w.uvIgpuScale, 1)
+		items = append(items, focusItem{
+			widget: w.uvIgpuScale, row: 8, col: 0,
+			section: "undervolt", editable: true, isVisible: uvVis,
+			onLeft: oL, onRight: oR, getValue: gV, setValue: sV,
+		})
+	}
 	items = append(items, focusItem{
-		widget: w.saveTdpBtn, row: 7, col: 0,
+		widget: w.saveUvBtn, row: 9, col: 0,
+		section: "undervolt", isVisible: uvVis,
+		onActivate: func() { w.saveUvBtn.Activate() },
+	})
+	items = append(items, focusItem{
+		widget: w.resetUvBtn, row: 9, col: 1,
+		section: "undervolt", isVisible: uvVis,
+		onActivate: func() { w.resetUvBtn.Activate() },
+	})
+
+	// Row 10: save buttons.
+	items = append(items, focusItem{
+		widget: w.saveTdpBtn, row: 10, col: 0,
 		section:    "actions",
 		onActivate: func() { w.saveTdpBtn.Activate() },
 	})
 	items = append(items, focusItem{
-		widget: w.saveFanBtn, row: 7, col: 1,
+		widget: w.saveFanBtn, row: 10, col: 1,
 		section:    "actions",
 		onActivate: func() { w.saveFanBtn.Activate() },
 	})
 	items = append(items, focusItem{
-		widget: w.saveBothBtn, row: 7, col: 2,
+		widget: w.saveBothBtn, row: 10, col: 2,
 		section:    "actions",
 		onActivate: func() { w.saveBothBtn.Activate() },
 	})
 
-	// Row 8: reset buttons.
+	// Row 11: reset buttons.
 	items = append(items, focusItem{
-		widget: w.resetTdpBtn, row: 8, col: 0,
+		widget: w.resetTdpBtn, row: 11, col: 0,
 		section:    "actions",
 		onActivate: func() { w.resetTdpBtn.Activate() },
 	})
 	items = append(items, focusItem{
-		widget: w.resetFanBtn, row: 8, col: 1,
+		widget: w.resetFanBtn, row: 11, col: 1,
 		section:    "actions",
 		onActivate: func() { w.resetFanBtn.Activate() },
 	})

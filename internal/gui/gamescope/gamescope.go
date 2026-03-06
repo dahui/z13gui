@@ -281,6 +281,8 @@ func (b *Backend) scaledCSS() string {
 .header-telemetry { font-size: %.0fpx; letter-spacing: %.1fpx; }
 .section-group { font-size: %.0fpx; letter-spacing: %.0fpx; margin-top: %.0fpx; }
 .section-label { font-size: %.0fpx; letter-spacing: %.0fpx; margin-top: %.0fpx; margin-bottom: %.0fpx; }
+.scale-value { font-size: %.0fpx; margin-top: %.0fpx; margin-bottom: %.0fpx; }
+.scale-name { font-size: %.0fpx; margin-top: %.0fpx; }
 .color-swatch { min-width: %.0fpx; min-height: %.0fpx; border-radius: %.0fpx; }
 .color-preset { padding: 0; min-width: %.0fpx; min-height: %.0fpx; border-radius: %.0fpx; }
 .bottom-bar button { min-width: %.0fpx; min-height: %.0fpx; padding: %.0fpx; border-radius: %.0fpx; }
@@ -308,6 +310,8 @@ func (b *Backend) scaledCSS() string {
 		10*s, 0.5*s,              // header-telemetry (font-size, letter-spacing)
 		13*s, 2*s, 2*s,           // section-group
 		11*s, 1*s, 6*s, 2*s,     // section-label
+		10*s, 2*s, 2*s,           // scale-value
+		10*s, 4*s,                // scale-name
 		28*s, 28*s, 4*s,          // color-swatch
 		28*s, 28*s, 4*s,          // color-preset
 		32*s, 32*s, 4*s, 6*s,    // bottom-bar button

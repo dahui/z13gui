@@ -84,6 +84,13 @@ type Window struct {
 	saveBothBtn *gtk.Button
 	resetTdpBtn *gtk.Button
 	resetFanBtn *gtk.Button
+	uvBox       *gtk.Box    // undervolt container, hidden when unavailable
+	uvCpuScale  *gtk.Scale
+	uvCpuLabel  *gtk.Label
+	uvIgpuScale *gtk.Scale
+	uvIgpuLabel *gtk.Label
+	saveUvBtn   *gtk.Button
+	resetUvBtn  *gtk.Button
 	headerTelemetry    *gtk.Label // "45°C · 3200 RPM" in main header
 	telemetryTempLabel *gtk.Label
 	telemetryFanLabel  *gtk.Label

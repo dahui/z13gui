@@ -60,6 +60,16 @@ window.z13-drawer-window {
     color: @z13-text-dim;
 }
 
+/* Slider value readouts */
+.scale-value {
+    color: @z13-text;
+}
+
+/* Slider name labels */
+.scale-name {
+    color: @z13-text-dim;
+}
+
 /* Separators */
 .drawer separator {
     background: @z13-border;
