@@ -45,6 +45,11 @@ window.z13-drawer-window {
     color: @z13-text-dim;
 }
 
+/* Header telemetry readout */
+.header-telemetry {
+    color: @z13-text-dim;
+}
+
 /* Section group headings */
 .section-group {
     color: @z13-text;
@@ -55,13 +60,39 @@ window.z13-drawer-window {
     color: @z13-text-dim;
 }
 
+/* Slider value readouts */
+.scale-value {
+    color: @z13-text;
+}
+
+/* Slider name labels */
+.scale-name {
+    color: @z13-text-dim;
+}
+
 /* Separators */
 .drawer separator {
     background: @z13-border;
     min-height: 1px;
 }
 
-/* Tab and mode/speed radio buttons */
+/* Button groups (profiles, modes, speeds) */
+.drawer .btn-group button {
+    background: @z13-surface;
+    color: @z13-text;
+    border: 1px solid @z13-border;
+}
+
+.drawer .btn-group button:hover {
+    background: @z13-surface-alt;
+}
+
+.drawer .btn-group button.active {
+    background: @z13-accent;
+    color: #ffffff;
+}
+
+/* Tab buttons (still CheckButton) */
 .drawer checkbutton {
     background: @z13-surface;
     color: @z13-text;
@@ -74,6 +105,17 @@ window.z13-drawer-window {
 .drawer checkbutton:checked {
     background: @z13-accent;
     color: #ffffff;
+}
+
+/* TDP warning label */
+.tdp-warning {
+    color: #ff4444;
+}
+
+/* Fan curve drawing area */
+.fan-curve-area {
+    background: @z13-surface;
+    border: 1px solid @z13-border;
 }
 
 
@@ -183,6 +225,39 @@ popover.z13-popover .accent-label {
 
 .bottom-bar switch:checked {
     background: @z13-accent;
+}
+
+/* Custom view action buttons (save, reset) */
+.drawer .custom-actions button {
+    background: @z13-surface;
+    color: @z13-text;
+    border: 1px solid @z13-border;
+}
+
+.drawer .custom-actions button:hover {
+    background: @z13-surface-alt;
+}
+
+/* Save button — accent styling */
+.drawer .save-btn {
+    background: @z13-accent;
+    color: #ffffff;
+}
+
+.drawer .save-btn:hover {
+    background: shade(@z13-accent, 1.2);
+}
+
+/* Advanced checkbox in custom view */
+.drawer .advanced-check {
+    background: @z13-surface;
+    color: @z13-text;
+    border: 1px solid @z13-border;
+}
+
+.drawer .advanced-check:checked {
+    background: @z13-accent;
+    color: #ffffff;
 }
 
 /* Gamepad focus indicator */

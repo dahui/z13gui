@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/dahui/z13ctl/api"
 	"github.com/dahui/z13gui/internal/theme"
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
+	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
@@ -35,13 +37,23 @@ func (w *Window) buildContent() gtk.Widgetter {
 	outer := gtk.NewBox(gtk.OrientationVertical, 0)
 	outer.AddCSSClass("drawer")
 
-	// Fixed title — sits above the scroll area, always visible.
-	title := gtk.NewLabel("z13ctl")
-	title.SetHAlign(gtk.AlignStart)
-	title.AddCSSClass("drawer-title")
-	title.SetMarginTop(10)
-	title.SetMarginBottom(6)
-	title.SetMarginStart(14)
+	// Fixed title row — sits above the scroll area, always visible.
+	titleRow := gtk.NewBox(gtk.OrientationHorizontal, 0)
+	titleRow.SetMarginTop(10)
+	titleRow.SetMarginBottom(6)
+	titleRow.SetMarginStart(14)
+	titleRow.SetMarginEnd(14)
+
+	titleLabel := gtk.NewLabel("z13ctl")
+	titleLabel.SetHAlign(gtk.AlignStart)
+	titleLabel.AddCSSClass("drawer-title")
+	titleRow.Append(titleLabel)
+
+	w.headerTelemetry = gtk.NewLabel("")
+	w.headerTelemetry.SetHAlign(gtk.AlignEnd)
+	w.headerTelemetry.SetHExpand(true)
+	w.headerTelemetry.AddCSSClass("header-telemetry")
+	titleRow.Append(w.headerTelemetry)
 
 	inner := gtk.NewBox(gtk.OrientationVertical, 8)
 	inner.SetMarginTop(4)
@@ -90,7 +102,7 @@ func (w *Window) buildContent() gtk.Widgetter {
 	w.viewStack.SetVExpand(true)
 
 	mainPage := gtk.NewBox(gtk.OrientationVertical, 0)
-	mainPage.Append(title)
+	mainPage.Append(titleRow)
 	mainPage.Append(scroll)
 	w.viewStack.AddNamed(mainPage, "main")
 	// Theme and color views are lazy-loaded on first navigation
@@ -410,6 +422,26 @@ func (w *Window) showMainView() {
 	}
 }
 
+// showCustomView switches the view stack to the custom TDP/fan view.
+// Lazy-builds the view on first access.
+func (w *Window) showCustomView() {
+	if w.viewStack == nil {
+		return
+	}
+	if w.viewStack.VisibleChildName() == "custom" {
+		w.showMainView()
+		return
+	}
+	if w.customScroll == nil {
+		w.viewStack.AddNamed(w.buildCustomView(), "custom")
+		w.buildCustomFocusList()
+	}
+	w.syncCustomView()
+	w.viewStack.SetVisibleChildName("custom")
+	w.swapFocusList(w.customFocusItems)
+	w.startTelemetryPolling()
+}
+
 // showThemeView switches the view stack to the theme picker view.
 // The theme view is lazy-built on first access to keep the initial widget tree small.
 func (w *Window) showThemeView() {
@@ -477,7 +509,7 @@ var modeOrder = []string{
 	"rainbow", "strobe", "off",
 }
 
-// buildModeSection creates the 3x2 grid of lighting mode radio buttons.
+// buildModeSection creates the 3x2 grid of lighting mode buttons.
 func (w *Window) buildModeSection() *gtk.Box {
 	box := gtk.NewBox(gtk.OrientationVertical, 4)
 	box.Append(sectionLabel("MODE"))
@@ -486,26 +518,17 @@ func (w *Window) buildModeSection() *gtk.Box {
 	grid.SetColumnSpacing(4)
 	grid.SetRowSpacing(4)
 	grid.AddCSSClass("mode-grid")
+	grid.AddCSSClass("btn-group")
 	grid.SetColumnHomogeneous(true)
 
-	var first *gtk.CheckButton
 	for i, m := range modeOrder {
 		mode := m
-		btn := gtk.NewCheckButtonWithLabel(strings.Title(mode)) //nolint:staticcheck // strings.Title is fine for ASCII-only mode/speed/profile labels
-		if first == nil {
-			first = btn
-		} else {
-			btn.SetGroup(first)
-		}
-		btn.ConnectToggled(func() {
-			if btn.Active() {
-				w.syncModeVis()
-				w.sendApply()
-			}
+		btn := gtk.NewButtonWithLabel(strings.Title(mode)) //nolint:staticcheck // strings.Title is fine for ASCII-only mode/speed/profile labels
+		btn.ConnectClicked(func() {
+			setActiveButton(w.modeButtons, mode)
+			w.syncModeVis()
+			w.sendApply()
 		})
-		if w.gamescope {
-			addTouchActivate(btn, func() { btn.SetActive(true) })
-		}
 		w.modeButtons[mode] = btn
 		grid.Attach(btn, i%3, i/3, 1, 1)
 	}
@@ -514,48 +537,50 @@ func (w *Window) buildModeSection() *gtk.Box {
 	return box
 }
 
-// buildRadioButtons creates a group of CheckButtons for the given options,
-// stores each in dst[option], and calls onChange when a button is activated.
-func (w *Window) buildRadioButtons(
+// setActiveButton removes .active from all buttons in the map and adds it
+// to the button matching the given key. Used for button groups that replaced
+// radio buttons (profiles, modes, speeds).
+func setActiveButton(btns map[string]*gtk.Button, active string) {
+	for k, b := range btns {
+		if k == active {
+			b.AddCSSClass("active")
+		} else {
+			b.RemoveCSSClass("active")
+		}
+	}
+}
+
+// buildButtonGroup creates a row of regular buttons for the given options,
+// stores each in dst[option], and calls onChange when a button is clicked.
+func (w *Window) buildButtonGroup(
 	orientation gtk.Orientation,
 	options []string,
-	dst map[string]*gtk.CheckButton,
+	dst map[string]*gtk.Button,
 	onChange func(string),
 ) *gtk.Box {
 	row := gtk.NewBox(orientation, 4)
-	var first *gtk.CheckButton
+	row.AddCSSClass("btn-group")
 	for _, opt := range options {
 		opt := opt
-		btn := gtk.NewCheckButtonWithLabel(strings.Title(opt)) //nolint:staticcheck // strings.Title is fine for ASCII-only mode/speed/profile labels
-		if first == nil {
-			first = btn
-		} else {
-			btn.SetGroup(first)
-		}
-		btn.ConnectToggled(func() {
-			if btn.Active() {
-				onChange(opt)
-			}
+		btn := gtk.NewButtonWithLabel(strings.Title(opt)) //nolint:staticcheck // strings.Title is fine for ASCII-only mode/speed/profile labels
+		btn.ConnectClicked(func() {
+			setActiveButton(dst, opt)
+			onChange(opt)
 		})
-		if w.gamescope {
-			addTouchActivate(btn, func() { btn.SetActive(true) })
-		}
 		dst[opt] = btn
 		row.Append(btn)
 	}
 	return row
 }
 
-// buildSpeedBox creates the slow/normal/fast radio button row.
+// buildSpeedBox creates the slow/normal/fast button row.
 func (w *Window) buildSpeedBox() *gtk.Box {
 	box := gtk.NewBox(gtk.OrientationVertical, 4)
 	box.Append(sectionLabel("SPEED"))
-	box.Append(w.buildRadioButtons(gtk.OrientationHorizontal, speeds, w.speedBtns, func(_ string) {
+	box.Append(w.buildButtonGroup(gtk.OrientationHorizontal, speeds, w.speedBtns, func(_ string) {
 		w.sendApply()
 	}))
-	if normal, ok := w.speedBtns["normal"]; ok {
-		normal.SetActive(true)
-	}
+	setActiveButton(w.speedBtns, "normal")
 	return box
 }
 
@@ -577,21 +602,50 @@ func (w *Window) buildBrightnessBox() *gtk.Box {
 	return box
 }
 
-// profiles lists the available sysfs performance profiles.
-var profiles = []string{"quiet", "balanced", "performance"}
+// profiles lists the available performance profiles. "custom" opens the TDP/fan view.
+var profiles = []string{"quiet", "balanced", "performance", "custom"}
 
 // speeds lists the available lighting animation speeds.
 var speeds = []string{"slow", "normal", "fast"}
 
-// buildProfileSection creates the profile radio buttons (quiet/balanced/performance).
+// buildProfileSection creates the 2x2 profile button grid.
 func (w *Window) buildProfileSection() *gtk.Box {
 	box := gtk.NewBox(gtk.OrientationVertical, 4)
 	box.Append(sectionLabel("PROFILE"))
-	box.Append(w.buildRadioButtons(gtk.OrientationVertical, profiles, w.profileBtns, func(prof string) {
-		if !w.syncing {
-			w.sendProfileSet(prof)
-		}
-	}))
+
+	grid := gtk.NewGrid()
+	grid.SetColumnSpacing(4)
+	grid.SetRowSpacing(4)
+	grid.SetColumnHomogeneous(true)
+	grid.AddCSSClass("btn-group")
+
+	for i, p := range profiles {
+		prof := p
+		btn := gtk.NewButtonWithLabel(strings.Title(prof)) //nolint:staticcheck // strings.Title is fine for ASCII-only labels
+		btn.ConnectClicked(func() {
+			if prof == "custom" {
+				w.showCustomView()
+			} else {
+				setActiveButton(w.profileBtns, prof)
+				w.sendProfileSet(prof)
+				go func() {
+					ok, state, err := api.SendGetState()
+					if ok && err == nil {
+						glib.IdleAdd(func() {
+							w.state = state
+							w.syncing = true
+							w.syncCustomView()
+							w.syncing = false
+						})
+					}
+				}()
+			}
+		})
+		w.profileBtns[prof] = btn
+		grid.Attach(btn, i%2, i/2, 1, 1)
+	}
+
+	box.Append(grid)
 	return box
 }
 
@@ -650,20 +704,20 @@ func (w *Window) buildMainFocusList() {
 		return func() bool { return box.IsVisible() }
 	}
 
-	// Profiles — stacked vertically, one per row.
+	// Profiles — 2x2 grid.
 	for i, p := range profiles {
 		btn := w.profileBtns[p]
 		items = append(items, focusItem{
-			widget: btn, row: i, col: 0,
+			widget: btn, row: i / 2, col: i % 2,
 			section:    "profile",
-			onActivate: func() { btn.SetActive(true) },
+			onActivate: func() { btn.Activate() },
 		})
 	}
 
 	// Battery slider.
 	battLeft, battRight, battGet, battSet := scaleAdjust(w.battScale, 5)
 	items = append(items, focusItem{
-		widget: w.battScale, row: 3, col: 0,
+		widget: w.battScale, row: 2, col: 0,
 		section:  "battery",
 		editable: true,
 		onLeft:   battLeft, onRight: battRight,
@@ -674,7 +728,7 @@ func (w *Window) buildMainFocusList() {
 	for col, btn := range []*gtk.CheckButton{w.tabKB, w.tabLB} {
 		btn := btn
 		items = append(items, focusItem{
-			widget: btn, row: 4, col: col,
+			widget: btn, row: 3, col: col,
 			section:    "tabs",
 			onActivate: func() { btn.SetActive(true) },
 		})
@@ -684,9 +738,9 @@ func (w *Window) buildMainFocusList() {
 	for i, m := range modeOrder {
 		btn := w.modeButtons[m]
 		items = append(items, focusItem{
-			widget: btn, row: 5 + i/3, col: i % 3,
+			widget: btn, row: 4 + i/3, col: i % 3,
 			section:    "mode",
-			onActivate: func() { btn.SetActive(true) },
+			onActivate: func() { btn.Activate() },
 		})
 	}
 
@@ -696,14 +750,14 @@ func (w *Window) buildMainFocusList() {
 		for col, btn := range w.color1.presetBtns {
 			btn := btn
 			items = append(items, focusItem{
-				widget: btn, row: 7, col: col,
+				widget: btn, row: 6, col: col,
 				section: "color1", isVisible: vis,
 				onActivate: func() { btn.Activate() },
 			})
 		}
 		// Custom button on its own row below presets.
 		items = append(items, focusItem{
-			widget: w.color1.customBtn, row: 8, col: 0,
+			widget: w.color1.customBtn, row: 7, col: 0,
 			section: "color1", isVisible: vis,
 			onActivate: func() { w.showColorView(w.color1) },
 		})
@@ -715,13 +769,13 @@ func (w *Window) buildMainFocusList() {
 		for col, btn := range w.color2.presetBtns {
 			btn := btn
 			items = append(items, focusItem{
-				widget: btn, row: 9, col: col,
+				widget: btn, row: 8, col: col,
 				section: "color2", isVisible: vis,
 				onActivate: func() { btn.Activate() },
 			})
 		}
 		items = append(items, focusItem{
-			widget: w.color2.customBtn, row: 10, col: 0,
+			widget: w.color2.customBtn, row: 9, col: 0,
 			section: "color2", isVisible: vis,
 			onActivate: func() { w.showColorView(w.color2) },
 		})
@@ -731,16 +785,16 @@ func (w *Window) buildMainFocusList() {
 	for col, s := range speeds {
 		btn := w.speedBtns[s]
 		items = append(items, focusItem{
-			widget: btn, row: 11, col: col,
+			widget: btn, row: 10, col: col,
 			section: "speed", isVisible: boxVisible(w.speedBox),
-			onActivate: func() { btn.SetActive(true) },
+			onActivate: func() { btn.Activate() },
 		})
 	}
 
 	// Brightness slider.
 	brLeft, brRight, brGet, brSet := scaleAdjust(w.brightScale, 1)
 	items = append(items, focusItem{
-		widget: w.brightScale, row: 12, col: 0,
+		widget: w.brightScale, row: 11, col: 0,
 		section: "brightness", isVisible: boxVisible(w.brightBox),
 		editable: true,
 		onLeft:   brLeft, onRight: brRight,
@@ -750,7 +804,7 @@ func (w *Window) buildMainFocusList() {
 	// Footer: theme button, overdrive, boot sound.
 	col := 0
 	items = append(items, focusItem{
-		widget: w.paletteBtn, row: 13, col: col,
+		widget: w.paletteBtn, row: 12, col: col,
 		section:    "footer",
 		onActivate: func() { w.showThemeView() },
 	})
@@ -758,7 +812,7 @@ func (w *Window) buildMainFocusList() {
 	if w.overdriveSwitch != nil {
 		sw := w.overdriveSwitch
 		items = append(items, focusItem{
-			widget: sw, row: 13, col: col,
+			widget: sw, row: 12, col: col,
 			section:    "footer",
 			onActivate: func() { sw.SetActive(!sw.Active()) },
 		})
@@ -767,7 +821,7 @@ func (w *Window) buildMainFocusList() {
 	if w.bootSoundSwitch != nil {
 		sw := w.bootSoundSwitch
 		items = append(items, focusItem{
-			widget: sw, row: 13, col: col,
+			widget: sw, row: 12, col: col,
 			section:    "footer",
 			onActivate: func() { sw.SetActive(!sw.Active()) },
 		})

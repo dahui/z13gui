@@ -8,7 +8,14 @@
     padding: 0;
 }
 
-/* Touch targets — all interactive controls minimum 48px tall */
+/* Touch targets — button group controls minimum 48px tall */
+.drawer .btn-group button {
+    min-height: 48px;
+    padding: 4px 10px;
+    border-radius: 6px;
+}
+
+/* Tab buttons (still CheckButton) */
 .drawer checkbutton {
     min-height: 48px;
     padding: 4px 10px;
@@ -16,8 +23,36 @@
 }
 
 /* Mode grid buttons are slightly taller */
-.drawer .mode-grid checkbutton {
+.drawer .mode-grid.btn-group button {
     min-height: 52px;
+}
+
+/* TDP warning text */
+.tdp-warning {
+    font-size: 10px;
+    font-weight: bold;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+/* Fan curve drawing area */
+.fan-curve-area {
+    min-height: 240px;
+    border-radius: 6px;
+}
+
+/* Custom view action buttons */
+.custom-actions button {
+    min-height: 36px;
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+
+/* Advanced checkbox — touch target */
+.advanced-check {
+    min-height: 36px;
+    padding: 4px 10px;
+    border-radius: 6px;
 }
 
 /* Tab buttons stretch to fill available width */
@@ -45,6 +80,12 @@
     letter-spacing: 3px;
 }
 
+/* Header telemetry readout — compact, right-aligned */
+.header-telemetry {
+    font-size: 10px;
+    letter-spacing: 0.5px;
+}
+
 /* Section group headings — larger, used for "TDP AND POWER" / "RGB" */
 .section-group {
     font-size: 13px;
@@ -61,6 +102,24 @@
     letter-spacing: 1px;
     margin-top: 6px;
     margin-bottom: 2px;
+}
+
+/* Slider value readouts — subordinate to section labels */
+.scale-value {
+    font-size: 10px;
+    font-weight: normal;
+    letter-spacing: 0;
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+/* Slider name labels — identifies what a slider controls */
+.scale-name {
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 0;
+    margin-top: 4px;
+    margin-bottom: 0px;
 }
 
 /* Current-color swatch — the non-interactive colored square. */

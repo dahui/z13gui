@@ -271,14 +271,18 @@ func (b *Backend) scaledCSS() string {
 	s := b.scale
 	return fmt.Sprintf(`/* Gamescope resolution scaling (%.1fx) */
 .drawer { font-family: 'Inter', sans-serif; font-size: %.0fpx; }
+.drawer .btn-group button { min-height: %.0fpx; padding: %.0fpx %.0fpx; border-radius: %.0fpx; }
 .drawer checkbutton { min-height: %.0fpx; padding: %.0fpx %.0fpx; border-radius: %.0fpx; }
-.drawer .mode-grid checkbutton { min-height: %.0fpx; }
+.drawer .mode-grid.btn-group button { min-height: %.0fpx; }
 .tab-btn { min-height: %.0fpx; }
 .drawer scale slider { min-width: %.0fpx; min-height: %.0fpx; }
 .drawer scale value { margin-bottom: %.0fpx; }
 .drawer-title { font-size: %.0fpx; letter-spacing: %.0fpx; }
+.header-telemetry { font-size: %.0fpx; letter-spacing: %.1fpx; }
 .section-group { font-size: %.0fpx; letter-spacing: %.0fpx; margin-top: %.0fpx; }
 .section-label { font-size: %.0fpx; letter-spacing: %.0fpx; margin-top: %.0fpx; margin-bottom: %.0fpx; }
+.scale-value { font-size: %.0fpx; margin-top: %.0fpx; margin-bottom: %.0fpx; }
+.scale-name { font-size: %.0fpx; margin-top: %.0fpx; }
 .color-swatch { min-width: %.0fpx; min-height: %.0fpx; border-radius: %.0fpx; }
 .color-preset { padding: 0; min-width: %.0fpx; min-height: %.0fpx; border-radius: %.0fpx; }
 .bottom-bar button { min-width: %.0fpx; min-height: %.0fpx; padding: %.0fpx; border-radius: %.0fpx; }
@@ -289,17 +293,25 @@ func (b *Backend) scaledCSS() string {
 .bottom-bar switch slider { min-width: %.0fpx; min-height: %.0fpx; border-radius: %.0fpx; }
 .view-back-btn { min-width: %.0fpx; min-height: %.0fpx; padding: %.0fpx; }
 .gamepad-focus { outline-width: %.0fpx; outline-offset: %.0fpx; }
-.gamepad-editing { outline-width: %.0fpx; outline-offset: %.0fpx; }`,
+.gamepad-editing { outline-width: %.0fpx; outline-offset: %.0fpx; }
+.tdp-warning { font-size: %.0fpx; margin-top: %.0fpx; margin-bottom: %.0fpx; }
+.fan-curve-area { min-height: %.0fpx; border-radius: %.0fpx; }
+.custom-actions button { min-height: %.0fpx; padding: %.0fpx %.0fpx; border-radius: %.0fpx; }
+.advanced-check { min-height: %.0fpx; padding: %.0fpx %.0fpx; border-radius: %.0fpx; }`,
 		s,
 		14*s,                     // .drawer font-size
+		48*s, 4*s, 10*s, 6*s,    // btn-group button
 		48*s, 4*s, 10*s, 6*s,    // checkbutton
-		52*s,                     // mode-grid checkbutton
+		52*s,                     // mode-grid btn-group button
 		48*s,                     // tab-btn
 		24*s, 24*s,               // scale slider
 		6*s,                      // scale value margin
 		11*s, 3*s,                // drawer-title
+		10*s, 0.5*s,              // header-telemetry (font-size, letter-spacing)
 		13*s, 2*s, 2*s,           // section-group
 		11*s, 1*s, 6*s, 2*s,     // section-label
+		10*s, 2*s, 2*s,           // scale-value
+		10*s, 4*s,                // scale-name
 		28*s, 28*s, 4*s,          // color-swatch
 		28*s, 28*s, 4*s,          // color-preset
 		32*s, 32*s, 4*s, 6*s,    // bottom-bar button
@@ -311,5 +323,9 @@ func (b *Backend) scaledCSS() string {
 		32*s, 32*s, 4*s,          // view-back-btn
 		2*s, 2*s,                 // gamepad-focus (outline-width, outline-offset)
 		2*s, 2*s,                 // gamepad-editing (outline-width, outline-offset)
+		10*s, 4*s, 4*s,           // tdp-warning (font-size, margin-top, margin-bottom)
+		240*s, 6*s,               // fan-curve-area (min-height, border-radius)
+		36*s, 4*s, 8*s, 6*s,     // custom-actions button (min-height, padding-v, padding-h, border-radius)
+		36*s, 4*s, 10*s, 6*s,    // advanced-check (min-height, padding-v, padding-h, border-radius)
 	)
 }

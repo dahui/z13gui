@@ -3,6 +3,7 @@ package gui
 // sync.go — daemon state synchronization and API communication.
 
 import (
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -34,16 +35,21 @@ var modeVisMap = map[string]modeVis{
 	"off":     {false, false, false, false},
 }
 
+// activeButton returns the key of the button with the .active CSS class,
+// or the fallback value if none is found.
+func activeButton(btns map[string]*gtk.Button, fallback string) string {
+	for k, b := range btns {
+		if b.HasCSSClass("active") {
+			return k
+		}
+	}
+	return fallback
+}
+
 // syncModeVis shows/hides color and speed sections based on the active mode.
 // Safe to call at any time (including during sync).
 func (w *Window) syncModeVis() {
-	mode := "static"
-	for m, btn := range w.modeButtons {
-		if btn.Active() {
-			mode = m
-			break
-		}
-	}
+	mode := activeButton(w.modeButtons, "static")
 	v, ok := modeVisMap[mode]
 	if !ok {
 		v = modeVis{true, true, true, true}
@@ -75,6 +81,10 @@ func (w *Window) syncState() {
 	w.syncBattery()
 	w.syncOverdrive()
 	w.syncBootSound()
+	w.syncCustomView()
+	if w.headerTelemetry != nil {
+		w.headerTelemetry.SetLabel(fmt.Sprintf("%d°C · %d RPM", w.state.Temperature, w.state.FanRPM))
+	}
 }
 
 // syncLightingSection updates mode, colors, speed, and brightness from the
@@ -92,9 +102,7 @@ func (w *Window) syncLightingSection() {
 			ls = w.state.Lighting
 		}
 	}
-	if btn, ok := w.modeButtons[ls.Mode]; ok {
-		btn.SetActive(true)
-	}
+	setActiveButton(w.modeButtons, ls.Mode)
 	if w.color1 != nil && ls.Color != "" {
 		w.color1.hex = strings.ToUpper(ls.Color)
 	}
@@ -102,23 +110,19 @@ func (w *Window) syncLightingSection() {
 		w.color2.hex = strings.ToUpper(ls.Color2)
 	}
 	w.updateSwatches()
-	if btn, ok := w.speedBtns[ls.Speed]; ok {
-		btn.SetActive(true)
-	}
+	setActiveButton(w.speedBtns, ls.Speed)
 	if w.brightScale != nil {
 		w.brightScale.SetValue(float64(ls.Brightness))
 	}
 	w.syncModeVis()
 }
 
-// syncProfile sets the profile radio button to match the daemon state.
+// syncProfile highlights the profile button matching the daemon state.
 func (w *Window) syncProfile() {
 	if w.state == nil || w.state.Profile == "" {
 		return
 	}
-	if btn, ok := w.profileBtns[w.state.Profile]; ok {
-		btn.SetActive(true)
-	}
+	setActiveButton(w.profileBtns, w.state.Profile)
 }
 
 // syncBattery sets the battery limit scale to match the daemon state.
@@ -162,21 +166,8 @@ func (w *Window) sendApply() {
 		color2 = w.color2.hex
 	}
 
-	mode := defaultMode
-	for m, btn := range w.modeButtons {
-		if btn.Active() {
-			mode = m
-			break
-		}
-	}
-
-	speed := defaultSpeed
-	for s, btn := range w.speedBtns {
-		if btn.Active() {
-			speed = s
-			break
-		}
-	}
+	mode := activeButton(w.modeButtons, defaultMode)
+	speed := activeButton(w.speedBtns, defaultSpeed)
 
 	brightness := defaultBrightness
 	if w.brightScale != nil {
