@@ -2,8 +2,8 @@ github.com/KarpelesLab/weak v0.1.1 h1:fNnlPo3aypS9tBzoEQluY13XyUfd/eWaSE/vMvo9s4
 github.com/KarpelesLab/weak v0.1.1/go.mod h1:pzXsWs5f2bf+fpgHayTlBE1qJpO3MpJKo5sRaLu1XNw=
 github.com/cilium/ebpf v0.20.0 h1:atwWj9d3NffHyPZzVlx3hmw1on5CLe9eljR8VuHTwhM=
 github.com/cilium/ebpf v0.20.0/go.mod h1:pzLjFymM+uZPLk/IXZUL63xdx5VXEo+enTzxkZXdycw=
-github.com/dahui/z13ctl/api v1.1.0 h1:oUW0bVJSHeNVBNT3hAQPzDGFi+8i35/qyQav6qMPcG4=
-github.com/dahui/z13ctl/api v1.1.0/go.mod h1:WaV3cyrZkszY22RbnJh05/YXMapnP3BcyiAvtyRLnj8=
+github.com/dahui/z13ctl/api v1.1.3 h1:kWmDwE0oYxeBF4P1wr6vq7ULf5fDwhyBWazmYQGjPvc=
+github.com/dahui/z13ctl/api v1.1.3/go.mod h1:WaV3cyrZkszY22RbnJh05/YXMapnP3BcyiAvtyRLnj8=
 github.com/diamondburned/gotk4-layer-shell/pkg v0.0.0-20240109211357-6efa9f6dc438 h1:Ymnl4B+Fn4srLxXbRV2RY1iHT2SH3oAkOfxeEeMI3Fg=
 github.com/diamondburned/gotk4-layer-shell/pkg v0.0.0-20240109211357-6efa9f6dc438/go.mod h1:AjrxxF6teeNWgaEg0zIUwoqFtXlVTHlEGZvrOn7RXaQ=
 github.com/diamondburned/gotk4/pkg v0.3.1 h1:uhkXSUPUsCyz3yujdvl7DSN8jiLS2BgNTQE95hk6ygg=

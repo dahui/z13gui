@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/cilium/ebpf v0.20.0
-	github.com/dahui/z13ctl/api v1.1.0
+	github.com/dahui/z13ctl/api v1.1.3
 	github.com/diamondburned/gotk4-layer-shell/pkg v0.0.0-20240109211357-6efa9f6dc438
 	github.com/diamondburned/gotk4/pkg v0.3.1
 	github.com/holoplot/go-evdev v0.0.0-20250804134636-ab1d56a1fe83
