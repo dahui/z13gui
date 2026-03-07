@@ -16,7 +16,7 @@ Press it again, click anywhere outside the drawer, or press **Escape** to close 
 | **Profile** | Switch between quiet, balanced, performance, and custom TDP profiles. Selecting custom opens a dedicated view. |
 | **Custom TDP** | Configurable power limits with basic (single slider) and advanced (PL1/PL2/PL3) modes |
 | **Fan Curve** | Edit the fan response curve per-profile (custom profile, advanced mode) |
-| **Undervolt** | CPU and iGPU Curve Optimizer offsets (custom profile, advanced mode; requires `ryzen_smu`) |
+| **Undervolt** | CPU Curve Optimizer offset (custom profile, advanced mode; requires `ryzen_smu`). iGPU CO is not supported on Strix Halo. |
 | **Telemetry** | Live APU temperature and fan RPM readouts (custom profile view) |
 | **Battery Limit** | Set the charge cap (40–100%). Changes persist across reboots. |
 | **Keyboard / Lightbar** | Tab between the two lighting zones |

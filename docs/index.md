@@ -12,7 +12,7 @@ GTK4 overlay drawer for **z13ctl** on Wayland — graphical controls for the
 - **Profile switching** — quiet, balanced, performance, and custom TDP profiles
 - **Custom TDP control** — configurable power limits (PL1/PL2/PL3) in the custom profile view, with basic and advanced modes
 - **Fan curve editor** — per-profile fan response curve editing (custom profile, advanced mode)
-- **Undervolt** — CPU and iGPU Curve Optimizer offsets (requires `ryzen_smu` kernel module)
+- **Undervolt** — CPU Curve Optimizer offset (requires `ryzen_smu` kernel module; iGPU CO is not supported on Strix Halo)
 - **APU telemetry** — live temperature and fan RPM readouts in the custom profile view
 - **Battery charge limit** — set the charge cap (40–100%) from the drawer
 - **RGB lighting** — mode, color, speed, and brightness for the keyboard

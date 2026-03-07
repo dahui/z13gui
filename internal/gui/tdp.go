@@ -441,7 +441,6 @@ func (w *Window) buildCustomView() *gtk.Box {
 	w.uvBox.Append(uvWarn)
 
 	w.uvCpuScale, w.uvCpuLabel = w.buildUvScale("CPU Curve Optimizer", -40, 0)
-	w.uvIgpuScale, w.uvIgpuLabel = w.buildUvScale("iGPU Curve Optimizer", -30, 0)
 
 	// UV buttons: Save UV | Reset UV
 	uvBtnRow := gtk.NewBox(gtk.OrientationHorizontal, 4)
@@ -624,18 +623,13 @@ func (w *Window) syncCustomView() {
 	if w.uvBox != nil {
 		w.uvBox.SetVisible(w.state.UndervoltAvailable)
 	}
-	cpuCO, igpuCO := 0, 0
+	cpuCO := 0
 	if w.state.Undervolt != nil && w.state.Profile == "custom" {
 		cpuCO = w.state.Undervolt.CPUCO
-		igpuCO = w.state.Undervolt.IGPUCO
 	}
 	if w.uvCpuScale != nil {
 		w.uvCpuScale.SetValue(float64(cpuCO))
 		w.uvCpuLabel.SetLabel(uvLabel("CPU Curve Optimizer", cpuCO))
-	}
-	if w.uvIgpuScale != nil {
-		w.uvIgpuScale.SetValue(float64(igpuCO))
-		w.uvIgpuLabel.SetLabel(uvLabel("iGPU Curve Optimizer", igpuCO))
 	}
 
 	// Telemetry.
@@ -773,12 +767,11 @@ func (w *Window) resetFanCurve() {
 func (w *Window) saveUndervolt() {
 	go func() {
 		cpu := fmt.Sprintf("%d", int(w.uvCpuScale.Value()))
-		igpu := fmt.Sprintf("%d", int(w.uvIgpuScale.Value()))
-		if _, err := api.SendUndervoltSet(cpu, igpu); err != nil {
+		if _, err := api.SendUndervoltSet(cpu); err != nil {
 			slog.Warn("undervolt set failed", "err", err)
 			return
 		}
-		slog.Info("undervolt saved", "cpu", cpu, "igpu", igpu)
+		slog.Info("undervolt saved", "cpu", cpu)
 		w.refreshProfile()
 	}()
 }
@@ -916,50 +909,42 @@ func (w *Window) buildCustomFocusList() {
 			onLeft: oL, onRight: oR, getValue: gV, setValue: sV,
 		})
 	}
-	if w.uvIgpuScale != nil {
-		oL, oR, gV, sV := scaleAdjust(w.uvIgpuScale, 1)
-		items = append(items, focusItem{
-			widget: w.uvIgpuScale, row: 8, col: 0,
-			section: "undervolt", editable: true, isVisible: uvVis,
-			onLeft: oL, onRight: oR, getValue: gV, setValue: sV,
-		})
-	}
 	items = append(items, focusItem{
-		widget: w.saveUvBtn, row: 9, col: 0,
+		widget: w.saveUvBtn, row: 8, col: 0,
 		section: "undervolt", isVisible: uvVis,
 		onActivate: func() { w.saveUvBtn.Activate() },
 	})
 	items = append(items, focusItem{
-		widget: w.resetUvBtn, row: 9, col: 1,
+		widget: w.resetUvBtn, row: 8, col: 1,
 		section: "undervolt", isVisible: uvVis,
 		onActivate: func() { w.resetUvBtn.Activate() },
 	})
 
-	// Row 10: save buttons.
+	// Row 9: save buttons.
 	items = append(items, focusItem{
-		widget: w.saveTdpBtn, row: 10, col: 0,
+		widget: w.saveTdpBtn, row: 9, col: 0,
 		section:    "actions",
 		onActivate: func() { w.saveTdpBtn.Activate() },
 	})
 	items = append(items, focusItem{
-		widget: w.saveFanBtn, row: 10, col: 1,
+		widget: w.saveFanBtn, row: 9, col: 1,
 		section:    "actions",
 		onActivate: func() { w.saveFanBtn.Activate() },
 	})
 	items = append(items, focusItem{
-		widget: w.saveBothBtn, row: 10, col: 2,
+		widget: w.saveBothBtn, row: 9, col: 2,
 		section:    "actions",
 		onActivate: func() { w.saveBothBtn.Activate() },
 	})
 
-	// Row 11: reset buttons.
+	// Row 10: reset buttons.
 	items = append(items, focusItem{
-		widget: w.resetTdpBtn, row: 11, col: 0,
+		widget: w.resetTdpBtn, row: 10, col: 0,
 		section:    "actions",
 		onActivate: func() { w.resetTdpBtn.Activate() },
 	})
 	items = append(items, focusItem{
-		widget: w.resetFanBtn, row: 11, col: 1,
+		widget: w.resetFanBtn, row: 10, col: 1,
 		section:    "actions",
 		onActivate: func() { w.resetFanBtn.Activate() },
 	})
