@@ -33,7 +33,6 @@ go.work.sum
 # .idea/
 .vscode/
 .claude/
-CLAUDE.md
 
 z13gui
 go.work
