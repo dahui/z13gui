@@ -423,9 +423,9 @@ func (w *Window) buildCustomView() *gtk.Box {
 	w.tdpWarningLabel.AddCSSClass("tdp-warning")
 	w.tdpAdvancedBox.Append(w.tdpWarningLabel)
 
-	w.tdpPL1Scale, w.tdpPL1Label = w.buildTdpScale("PL1 (SPL)")
-	w.tdpPL2Scale, w.tdpPL2Label = w.buildTdpScale("PL2 (SPPT)")
-	w.tdpPL3Scale, w.tdpPL3Label = w.buildTdpScale("PL3 (FPPT)")
+	w.tdpPL1Scale, w.tdpPL1Label = w.buildTdpScale("PL1 (SPL)", "Sustained power limit — the long-term average power the CPU targets.")
+	w.tdpPL2Scale, w.tdpPL2Label = w.buildTdpScale("PL2 (SPPT)", "Short boost — maximum power during brief burst workloads.")
+	w.tdpPL3Scale, w.tdpPL3Label = w.buildTdpScale("PL3 (FPPT)", "Fast boost — peak instantaneous power for single-threaded spikes.")
 
 	// --- UNDERVOLT (inside advanced box) ---
 	w.uvBox = gtk.NewBox(gtk.OrientationVertical, 4)
@@ -530,11 +530,16 @@ func (w *Window) buildCustomView() *gtk.Box {
 
 // buildTdpScale creates a labeled TDP slider (5–93W) and appends it to the
 // advanced box. Returns the scale and value label.
-func (w *Window) buildTdpScale(label string) (*gtk.Scale, *gtk.Label) {
+func (w *Window) buildTdpScale(label, desc string) (*gtk.Scale, *gtk.Label) {
 	nameLabel := gtk.NewLabel(label)
 	nameLabel.SetHAlign(gtk.AlignStart)
 	nameLabel.AddCSSClass("scale-name")
 	w.tdpAdvancedBox.Append(nameLabel)
+	descLabel := gtk.NewLabel(desc)
+	descLabel.SetHAlign(gtk.AlignStart)
+	descLabel.SetWrap(true)
+	descLabel.AddCSSClass("scale-value")
+	w.tdpAdvancedBox.Append(descLabel)
 	sc := gtk.NewScaleWithRange(gtk.OrientationHorizontal, tdpMin, tdpMaxAdvanced, 1)
 	sc.SetDigits(0)
 	sc.SetDrawValue(false)
