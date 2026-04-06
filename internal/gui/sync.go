@@ -102,7 +102,11 @@ func (w *Window) syncLightingSection() {
 			ls = w.state.Lighting
 		}
 	}
-	setActiveButton(w.modeButtons, ls.Mode)
+	mode := ls.Mode
+	if !ls.Enabled {
+		mode = "off"
+	}
+	setActiveButton(w.modeButtons, mode)
 	if w.color1 != nil && ls.Color != "" {
 		w.color1.hex = strings.ToUpper(ls.Color)
 	}
@@ -174,10 +178,17 @@ func (w *Window) sendApply() {
 		brightness = int(w.brightScale.Value())
 	}
 
-	// "off" is a UI-only pseudo-mode: send static at brightness 0.
+	// "off" uses the daemon's dedicated off command so that Enabled=false
+	// is persisted and survives a reboot.
 	if mode == "off" {
-		mode = "static"
-		brightness = 0
+		slog.Debug("sendApply: calling daemon off", "device", w.tab)
+		start := time.Now()
+		if _, err := api.SendOff(w.tab); err != nil {
+			slog.Warn("off failed", "err", err, "elapsed", time.Since(start))
+		} else {
+			slog.Debug("sendApply: off done", "elapsed", time.Since(start))
+		}
+		return
 	}
 
 	slog.Debug("sendApply: calling daemon", "device", w.tab, "mode", mode, "brightness", brightness)
