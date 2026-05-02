@@ -64,7 +64,9 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 	gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeRight, b.hiddenMargin)
 	b.appWin.SetSizeRequest(b.drawerWidth, -1)
 
-	// Set top/bottom margins to 5% of screen height once the surface is realized.
+	// Pin the layer surface to its monitor and set top/bottom margins to
+	// 5% of screen height once the surface is realized. Pinning prevents
+	// negative right-margin hide from bleeding onto an adjacent display.
 	b.appWin.Connect("realize", func() {
 		surface := b.appWin.Surface()
 		if surface == nil {
@@ -74,6 +76,7 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 		if monitor == nil {
 			return
 		}
+		gtk4layershell.SetMonitor(b.gtkWin, monitor)
 		geo := monitor.Geometry()
 		margin := geo.Height() / marginFraction
 		gtk4layershell.SetMargin(b.gtkWin, gtk4layershell.LayerShellEdgeTop, margin)
