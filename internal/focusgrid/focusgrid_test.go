@@ -372,3 +372,54 @@ func TestNavigationNeverLandsOnAHiddenOrInvalidItem(t *testing.T) {
 		}
 	}
 }
+
+// TestMoveVerticalTieBreakIsColumnNotSliceOrder pins the rule stated on
+// MoveVertical: with two equidistant candidates the lower column wins.
+//
+// It used to fall out of slice order — the first equidistant item found — which
+// matched only because every focus list in the drawer happens to be appended left
+// to right. The rule is what makes down-then-up return to where you started, so
+// it has to hold for any input order, not just the convenient one.
+func TestMoveVerticalTieBreakIsColumnNotSliceOrder(t *testing.T) {
+	// Cursor at col 1; the target row has cols 0 and 2, both one away.
+	orders := map[string][]Item{
+		"target row listed high column first": {
+			{Row: 0, Col: 1, Visible: true},
+			{Row: 1, Col: 2, Visible: true},
+			{Row: 1, Col: 0, Visible: true},
+		},
+		"target row listed low column first": {
+			{Row: 0, Col: 1, Visible: true},
+			{Row: 1, Col: 0, Visible: true},
+			{Row: 1, Col: 2, Visible: true},
+		},
+	}
+	for name, items := range orders {
+		t.Run(name, func(t *testing.T) {
+			got := MoveVertical(items, 0, 1)
+			if items[got].Col != 0 {
+				t.Errorf("tie went to col %d, want the lower column 0", items[got].Col)
+			}
+		})
+	}
+}
+
+// TestMoveVerticalRoundTrips is the property the tie-break exists to provide:
+// moving down and back up returns to the starting item, whatever order the rows
+// were appended in.
+func TestMoveVerticalRoundTrips(t *testing.T) {
+	items := []Item{
+		{Row: 0, Col: 2, Visible: true}, // 0
+		{Row: 0, Col: 0, Visible: true}, // 1
+		{Row: 1, Col: 2, Visible: true}, // 2
+		{Row: 1, Col: 0, Visible: true}, // 3
+	}
+	for start := range items {
+		down := MoveVertical(items, start, 1)
+		back := MoveVertical(items, down, -1)
+		if items[back].Col != items[start].Col {
+			t.Errorf("from idx %d (col %d): down to col %d, up to col %d — not a round trip",
+				start, items[start].Col, items[down].Col, items[back].Col)
+		}
+	}
+}

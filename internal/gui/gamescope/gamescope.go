@@ -299,7 +299,10 @@ func (b *Backend) scaledCSS() string {
 .tdp-warning { font-size: %.0fpx; margin-top: %.0fpx; margin-bottom: %.0fpx; }
 .fan-curve-area { min-height: %.0fpx; border-radius: %.0fpx; }
 .custom-actions button { min-height: %.0fpx; padding: %.0fpx %.0fpx; border-radius: %.0fpx; }
-.advanced-check { min-height: %.0fpx; padding: %.0fpx %.0fpx; border-radius: %.0fpx; }`,
+.advanced-check { min-height: %.0fpx; padding: %.0fpx %.0fpx; border-radius: %.0fpx; }
+.error-bar { padding: %.0fpx %.0fpx; margin: 0 %.0fpx %.0fpx %.0fpx; border-radius: %.0fpx; }
+.error-bar .error-text { font-size: %.0fpx; }
+.error-bar .error-dismiss { min-height: %.0fpx; min-width: %.0fpx; }`,
 		s,
 		14*s,                 // .drawer font-size
 		48*s, 4*s, 10*s, 6*s, // btn-group button
@@ -329,5 +332,11 @@ func (b *Backend) scaledCSS() string {
 		240*s, 6*s, // fan-curve-area (min-height, border-radius)
 		36*s, 4*s, 8*s, 6*s, // custom-actions button (min-height, padding-v, padding-h, border-radius)
 		36*s, 4*s, 10*s, 6*s, // advanced-check (min-height, padding-v, padding-h, border-radius)
+		// Error bar. Omitting it left the drawer's only failure report at 1x while
+		// everything around it scaled — smallest text on screen, and a dismiss
+		// button too small to hit, in the mode where that matters most.
+		6*s, 8*s, 8*s, 4*s, 8*s, 6*s, // error-bar (padding-v, padding-h, margin r/b/l, border-radius)
+		10*s,       // error-text font-size
+		20*s, 20*s, // error-dismiss (min-height, min-width)
 	)
 }

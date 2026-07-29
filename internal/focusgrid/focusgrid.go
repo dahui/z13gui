@@ -109,8 +109,16 @@ func MoveVertical(items []Item, idx, dir int) int {
 		if d < 0 {
 			d = -d
 		}
-		if best == -1 || d < bestDist {
+		// The tie-break is on column, not on position in the slice. Taking the
+		// first equidistant item found made the result depend on the order the
+		// caller happened to append its rows in: every list built today runs
+		// left to right, so this matched, but nothing enforced it and the rule
+		// documented above quietly did not hold for any other order.
+		switch {
+		case best == -1, d < bestDist:
 			best, bestDist = i, d
+		case d == bestDist && items[i].Col < items[best].Col:
+			best = i
 		}
 	}
 	if best == -1 {

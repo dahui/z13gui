@@ -256,3 +256,47 @@ func TestRGBAcceptsThemeTokenForm(t *testing.T) {
 		}
 	}
 }
+
+// TestRGBAcceptsEveryFormIsHexColorDoes ties RGB to the theme parser's notion of
+// a colour. theme.IsHexColor accepts 3, 6 and 8 digits, so a theme.toml may carry
+// an #rrggbbaa value; RGB rejecting it made every fan curve element silently fall
+// back to the default palette for that theme.
+//
+// The alpha is dropped, not honoured: the chart picks its own per-element opacity.
+func TestRGBAcceptsEveryFormIsHexColorDoes(t *testing.T) {
+	tests := []struct {
+		hex     string
+		r, g, b float64
+	}{
+		{"#f00", 1, 0, 0},
+		{"#ff0000", 1, 0, 0},
+		{"#ff0000aa", 1, 0, 0},
+		{"#FF0000AA", 1, 0, 0},
+		{"#89b4fa80", 137.0 / 255, 180.0 / 255, 250.0 / 255},
+		// Bare, as Normalize also allows.
+		{"ff0000aa", 1, 0, 0},
+	}
+	const eps = 1e-9
+	for _, tt := range tests {
+		r, g, b, ok := RGB(tt.hex)
+		if !ok {
+			t.Errorf("RGB(%q) rejected a form theme.IsHexColor accepts", tt.hex)
+			continue
+		}
+		if math.Abs(r-tt.r) > eps || math.Abs(g-tt.g) > eps || math.Abs(b-tt.b) > eps {
+			t.Errorf("RGB(%q) = (%v, %v, %v), want (%v, %v, %v)",
+				tt.hex, r, g, b, tt.r, tt.g, tt.b)
+		}
+	}
+}
+
+// The daemon's wire format is strictly RRGGBB, so loosening RGB must not have
+// loosened Normalize with it — an 8-digit value reaching the hardware would be
+// wrong, and silently writing it back is the bug Normalize was added to stop.
+func TestNormalizeStillRejectsAlphaForms(t *testing.T) {
+	for _, hex := range []string{"#ff0000aa", "ff0000aa", "#FF0000AA", "#f00a"} {
+		if got, ok := Normalize(hex); ok {
+			t.Errorf("Normalize(%q) = %q, ok — the daemon format has no alpha", hex, got)
+		}
+	}
+}

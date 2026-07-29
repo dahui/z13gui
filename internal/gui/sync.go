@@ -211,6 +211,18 @@ func (w *Window) sendProfileSet(prof string) {
 func (w *Window) initBatteryDebounce(sc *gtk.Scale) {
 	var debounce *time.Timer
 	sc.ConnectValueChanged(func() {
+		// The syncing guard every other input has. syncBattery sets this scale from
+		// daemon state, which fires this handler, so without it every drawer open
+		// wrote the limit straight back to the hardware 200ms later. Harmless while
+		// the write succeeds — it is the value the daemon just reported — but on a
+		// device that rejects it that is now a visible error bar on every open,
+		// since daemon failures are no longer swallowed.
+		//
+		// Checked here rather than in the timer: by the time it fires the sync has
+		// long finished and the flag is false again.
+		if w.syncing {
+			return
+		}
 		if debounce != nil {
 			debounce.Stop()
 		}

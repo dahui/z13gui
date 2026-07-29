@@ -90,8 +90,20 @@ func HexToHSL(hex string) (h, s, l float64, ok bool) {
 // ones. ok is false when hex is not a colour, in which case the caller must fall
 // back rather than draw the zero value — which is black, and invisible against a
 // dark theme's background.
+//
+// Unlike Normalize it also accepts the 8-digit #rrggbbaa form and discards the
+// alpha, because theme colours are a different input from daemon colours. A
+// theme.toml may legitimately use it — theme.IsHexColor accepts 3, 6 and 8 digits
+// — whereas the daemon's wire format is strictly RRGGBB, so Normalize must keep
+// rejecting it. Missing that distinction made every chart element silently fall
+// back to the default palette for such a theme. Alpha is dropped rather than
+// honoured because the chart chooses its own per-element opacity.
 func RGB(hex string) (r, g, b float64, ok bool) {
-	norm, ok := Normalize(hex)
+	s := strings.TrimSpace(hex)
+	if len(strings.TrimPrefix(s, "#")) == 8 {
+		s = strings.TrimPrefix(s, "#")[:6]
+	}
+	norm, ok := Normalize(s)
 	if !ok {
 		return 0, 0, 0, false
 	}

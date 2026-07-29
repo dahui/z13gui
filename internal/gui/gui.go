@@ -342,7 +342,12 @@ func (w *Window) hide() {
 	// Steam resumes input processing. gen makes that delay safe: a show landing
 	// inside the 200ms window supersedes this release, which would otherwise hand
 	// the game the D-pad presses navigating the re-opened drawer.
-	if w.steamBlocker != nil && w.steamPID > 0 {
+	// Gated on the blocker, not on steamPID: BlockSteam runs off-thread, so a hide
+	// arriving before it lands would otherwise see steamPID == 0, take the
+	// immediate path, and skip the delay that lets the dismiss button's release be
+	// consumed first. UnblockSteam(0) is already a no-op, and show's own goroutine
+	// releases a block that completes after the drawer has closed.
+	if w.steamBlocker != nil {
 		pid := w.steamPID
 		w.steamPID = 0
 		go func() {
