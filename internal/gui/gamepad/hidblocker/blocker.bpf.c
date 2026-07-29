@@ -1,5 +1,20 @@
 //go:build ignore
 
+// Deliberately carries no SPDX header, unlike every other source file here.
+//
+// The LICENSE[] section at the bottom of this file declares "GPL" to the kernel.
+// That is not a copyright statement — it is the string the kernel's BPF verifier
+// reads to decide whether the program may call GPL-only helpers, and it is
+// load-bearing: BPF_CORE_READ below expands to bpf_probe_read_kernel, which is
+// gpl_only, so the program fails to load if it declares anything else.
+//
+// Stamping an Apache-2.0 header here would sit awkwardly next to that, since
+// Apache-2.0 and GPL-2.0 are not one-way compatible, and the honest answer needs
+// a decision rather than a default: the usual convention for BPF sources is to
+// license them "GPL-2.0 OR BSD-3-Clause" so the kernel declaration and the
+// source licence agree. Left unstamped pending that call — the repository
+// LICENSE still applies to it in the meantime.
+
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>

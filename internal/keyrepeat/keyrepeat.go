@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package keyrepeat decides which held direction owns a gamepad's auto-repeat.
 //
 // Holding a D-pad direction repeats it: one press, then a burst until release.

@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package startup holds the process-startup logic that runs before any GTK code:
 // command-line scanning and log filtering.
 //

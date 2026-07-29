@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package focusgrid is the gamepad focus navigation for the drawer: given a set
 // of items laid out in rows, columns and sections, it answers "which item does
 // this D-pad press move to".

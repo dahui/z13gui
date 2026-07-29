@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package gamescope implements the X11 overlay display backend for gamescope
 // (Steam Gaming Mode). It sets X11 atoms on the window so gamescope composites
 // it as an external overlay above the running game.

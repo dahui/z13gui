@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package layershell implements the Wayland layer-shell display backend.
 // It handles layer-shell initialization, margin-based slide animation,
 // and focus-loss auto-hide for compositors like KDE Plasma, Hyprland, and Sway.

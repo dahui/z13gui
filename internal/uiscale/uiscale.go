@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package uiscale computes the drawer's UI scale factor for the gamescope
 // backend, where GTK cannot be asked to scale for us.
 //

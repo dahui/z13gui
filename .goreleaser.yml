@@ -24,6 +24,11 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
+      - NOTICE
+      - TRADEMARK.md
+      # Inter is embedded into the binary with //go:embed, so the OFL notice has
+      # to travel with every artifact, not just sit in the source tree.
+      - internal/gui/fonts/LICENSE-Inter.txt
       - contrib/z13gui.service
       - contrib/z13gui.desktop
       - contrib/99-z13gui-gamepad.rules
@@ -55,6 +60,12 @@ nfpms:
     contents:
       - src: LICENSE
         dst: /usr/share/licenses/z13gui/LICENSE
+      - src: NOTICE
+        dst: /usr/share/licenses/z13gui/NOTICE
+      # The embedded typeface ships inside the binary, so its licence belongs
+      # alongside the package's own.
+      - src: internal/gui/fonts/LICENSE-Inter.txt
+        dst: /usr/share/licenses/z13gui/LICENSE-Inter.txt
       - src: contrib/z13gui.service
         dst: /usr/lib/systemd/user/z13gui.service
       - src: contrib/z13gui.desktop

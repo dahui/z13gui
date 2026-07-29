@@ -16,6 +16,9 @@ sha256sums=('SHA256_PLACEHOLDER')
 package() {
     install -Dm755 "z13gui"                                    "${pkgdir}/usr/bin/z13gui"
     install -Dm644 "LICENSE"                                   "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+    install -Dm644 "NOTICE"                                    "${pkgdir}/usr/share/licenses/${pkgname}/NOTICE"
+    # Inter is compiled into the binary, so the OFL notice ships with it.
+    install -Dm644 "internal/gui/fonts/LICENSE-Inter.txt"       "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-Inter.txt"
     install -Dm644 "contrib/z13gui.service"                    "${pkgdir}/usr/lib/systemd/user/z13gui.service"
     install -Dm644 "contrib/z13gui.desktop"                    "${pkgdir}/usr/share/applications/z13gui.desktop"
     install -Dm644 "contrib/99-z13gui-gamepad.rules"           "${pkgdir}/usr/lib/udev/rules.d/99-z13gui-gamepad.rules"

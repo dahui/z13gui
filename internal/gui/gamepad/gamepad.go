@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package gamepad reads Linux evdev gamepad events and dispatches normalized
 // actions to the GUI. It scans /dev/input/event* for gamepad devices, reads
 // events in background goroutines, and translates them into Action values.

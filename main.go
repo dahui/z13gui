@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 // z13gui — GTK4 Wayland overlay drawer for z13ctl.

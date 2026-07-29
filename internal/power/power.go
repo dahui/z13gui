@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package power holds the TDP and fan-curve rules the drawer needs in order to
 // avoid offering the user a state the z13ctl daemon would refuse.
 //

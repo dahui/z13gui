@@ -1,3 +1,6 @@
+/* Copyright 2026 Jeff Hagadorn
+   SPDX-License-Identifier: Apache-2.0 */
+
 /* layout.css — structural rules only. No colors. Not user-overridable.
    This file is embedded in the binary and always loaded at PRIORITY_APPLICATION.
    All element-level rules are scoped to .drawer to avoid affecting child windows

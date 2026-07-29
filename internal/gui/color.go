@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 package gui
 
 // color.go — color input widget: swatch + preset buttons + custom button.

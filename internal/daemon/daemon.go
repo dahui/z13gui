@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package daemon turns a z13ctl api call's result pair into a single error.
 //
 // Every api.Send* function returns (handled bool, err error), where handled is

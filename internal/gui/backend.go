@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 package gui
 
 import "github.com/diamondburned/gotk4/pkg/gtk/v4"

@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 package theme
 
 // Colors holds the 8 named color values that drive the entire GUI theme.

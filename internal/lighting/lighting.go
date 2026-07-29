@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package lighting holds the drawer's RGB lighting rules: which mode a daemon
 // state represents, which controls that mode needs, and what to fall back to when
 // state is missing.

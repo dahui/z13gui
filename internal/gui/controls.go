@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 package gui
 
 // controls.go — builds the entire drawer widget tree, theme picker view,

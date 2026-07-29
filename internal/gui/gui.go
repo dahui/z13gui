@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package gui implements the GTK4 overlay drawer for z13gui.
 // It provides the main Window type that handles daemon state synchronization,
 // GTK widget construction, and theming. Display-mode-specific concerns

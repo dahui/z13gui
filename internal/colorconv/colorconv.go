@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package colorconv converts between the RRGGBB hex strings the z13ctl daemon
 // speaks and the HSL components the drawer's colour picker manipulates.
 //
