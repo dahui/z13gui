@@ -21,8 +21,8 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       # goreleaser runs `go mod tidy` as a before-hook, so an untidy tree means
@@ -49,10 +49,10 @@ jobs:
     steps:
       - name: Install dependencies
         run: pacman -Syu --noconfirm git base-devel go gtk4 gtk4-layer-shell gobject-introspection
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Fix git ownership
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Build
@@ -62,6 +62,12 @@ jobs:
       # command and nothing in the Makefile checked formatting at all.
       - name: gofmt
         run: make fmt-check
-      - uses: golangci/golangci-lint-action@v6
+      # Pinned, not `latest`. `latest` is what broke this: action v6 only knows the
+      # golangci-lint v1 line, whose final release (1.64.8) was built with Go 1.24
+      # and so refuses a go.mod targeting 1.25 — a failure no change to this repo
+      # could have caused or fixed. A pin also makes CI run the identical linter to
+      # `make lint`, so "passes locally" means something. Bump deliberately, in step
+      # with the Go version in go.mod.
+      - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.12.2
