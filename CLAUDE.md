@@ -68,8 +68,8 @@ internal/theme/
   config.go                     Config persistence (selected theme/accent)
   *_test.go                     Theme parsing, CSS generation, and built-in completeness tests
 internal/power/
-  power.go                      TDP limits + fan curve rules (pure; mirrors z13ctl internal/cli)
-  power_test.go                 Unit tests (pure Go, no GTK4) — 100% coverage
+  power.go                      Limits value: TDP/fan bounds + rules (pure; mirrors z13ctl internal/cli)
+  power_test.go                 Unit tests incl. a fictional 2nd device — 100% coverage
 internal/togglegate/
   togglegate.go                 Pure debounce helper for duplicate gui-toggle bursts
   togglegate_test.go            Unit tests (pure Go, no GTK4)
@@ -132,15 +132,29 @@ contrib/
   round-trip in a goroutine — see `sendApply()` in `sync.go` for the pattern.
 - **Pure rules live in `internal/power`, not in the widget code.** `internal/gui`
   needs CGO + GTK4 headers so it cannot be unit tested; anything that is a *decision*
-  rather than a *widget* belongs in `power` where it is covered by tests. Currently:
-  the TDP limits, `NeedsAdvanced`, `FanFloorPWM`, `ForceRequired`, and the `Curve`
-  type with `EnforceConstraints`/`String`. `tdp.go` aliases the constants and
-  delegates. Add new rules there, with tests, rather than inline in `tdp.go`.
+  rather than a *widget* belongs in `power` where it is covered by tests. Add new
+  rules there, with tests, rather than inline in `tdp.go`.
+- **Device limits are a value, not constants.** `power.Limits` holds the TDP range,
+  fan floor, temperature axis and stock PPT table; `Window.limits` is initialised to
+  `power.DefaultLimits()` (the Z13's values). **No TDP or fan bound may be hardcoded
+  in `internal/gui`** — derive it from `w.limits` / `fc.limits()`, because z13ctl is
+  being extended to devices with different envelopes. The design brief for the
+  eventual daemon-served limits is in z13ctl's `.claude/plans/device-limits-api.md`;
+  when it lands, only where `Window.limits` is assigned changes.
+  - Presentation policy stays derived, not fixed: `BasicSliderMax()` is
+    `TDPMaxSafe - 5`, not a literal 70, because 70 is meaningless on a device whose
+    safe max is 54.
+  - `Sanitized()` replaces zero fields with defaults, for the day a daemon older
+    than the client omits one. `HighTDPMinPWM` is exempt — 0 legitimately means "no
+    fan floor on this device".
+  - `power.Curve` is a fixed `[8]` array. If a device ever needs a different point
+    count it becomes a slice and the compile-time length guarantee is lost.
 - **High-TDP fan floor**: while sustained PL1 exceeds 75W the daemon rejects any fan
   curve point below 204 PWM (80%) and refuses a fan reset outright. `fanFloorPWM()`
   derives this from applied daemon state (not slider position); `enforceConstraints`
   clamps drags to it, `fanCurveEditor.draw` renders the floor line, and `resetFanBtn` is
-  desensitized with a tooltip pointing at Reset TDP.
+  desensitized with a tooltip pointing at Reset TDP. Both the threshold and the
+  floor come from `w.limits`, not from literals.
 - **Basic vs advanced TDP view**: basic mode is one slider applying a single value to
   all three limits, capped at 70W. `power.NeedsAdvanced` decides whether a state can be
   shown there; `syncCustomView` force-checks the Advanced box when it cannot. Without

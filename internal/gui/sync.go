@@ -212,6 +212,10 @@ func (w *Window) sendApply() {
 }
 
 // sendProfileSet sends a profile change to the daemon.
+// The state refresh runs on this same goroutine, after the set returns. It must
+// not be a separate goroutine: switching to a stock profile makes the daemon
+// rewrite the PPT values and release the fans to firmware auto, and a concurrent
+// get-state can read the old values and repaint the custom view with them.
 func (w *Window) sendProfileSet(prof string) {
 	go func() {
 		slog.Debug("sendProfileSet: calling daemon", "profile", prof)
@@ -222,6 +226,7 @@ func (w *Window) sendProfileSet(prof string) {
 		}
 		w.clearErrorAsync()
 		slog.Debug("sendProfileSet: done", "elapsed", time.Since(start))
+		w.refreshState()
 	}()
 }
 

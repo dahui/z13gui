@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dahui/z13ctl/api"
 	"github.com/dahui/z13gui/internal/theme"
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
-	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
@@ -631,18 +629,9 @@ func (w *Window) buildProfileSection() *gtk.Box {
 				w.showCustomView()
 			} else {
 				setActiveButton(w.profileBtns, prof)
+				// sendProfileSet refreshes state itself once the daemon has
+				// applied the profile; fetching it here in parallel would race.
 				w.sendProfileSet(prof)
-				go func() {
-					ok, state, err := api.SendGetState()
-					if ok && err == nil {
-						glib.IdleAdd(func() {
-							w.state = state
-							w.syncing = true
-							w.syncCustomView()
-							w.syncing = false
-						})
-					}
-				}()
 			}
 		})
 		w.profileBtns[prof] = btn

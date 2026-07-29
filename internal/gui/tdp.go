@@ -14,23 +14,12 @@ import (
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
-// TDP limits, aliased from internal/power so the widget code reads naturally.
-// The rules themselves — and their tests — live in that package; nothing here
-// should re-derive them.
-const (
-	tdpMin         = power.TDPMin
-	tdpMaxBasic    = power.TDPMaxBasic    // basic slider max
-	tdpMaxSafe     = power.TDPMaxSafe     // warning threshold; also the fan floor trigger
-	tdpMaxAdvanced = power.TDPMaxAdvanced // advanced slider max (force=true above 75)
-	highTDPMinPWM  = power.HighTDPMinPWM  // 80% fan floor above tdpMaxSafe
-)
-
 // fanCurveEditor renders and handles interaction for the 8-point fan curve.
 // The curve model and its constraint rules live in internal/power; this type
 // owns only the drawing and pointer handling.
 type fanCurveEditor struct {
 	area     *gtk.DrawingArea
-	points   power.Curve // 8 points; temp 35–105°C, pwm 0–255
+	points   power.Curve // temp/PWM bounds come from Window.limits
 	dragging int         // point index being dragged, -1 if none
 	hovered  int         // point index under cursor, -1 if none
 	w        *Window     // parent for theme colors + telemetry
@@ -39,11 +28,23 @@ type fanCurveEditor struct {
 	chartX, chartY, chartW, chartH float64
 }
 
-// defaultFanCurve returns a reasonable default fan curve.
-func defaultFanCurve() power.Curve { return power.DefaultCurve() }
-
 // curveString returns the curve in "temp:pwm,temp:pwm,..." format for the API.
 func (fc *fanCurveEditor) curveString() string { return fc.points.String() }
+
+// limits returns the device envelope driving the editor's axes and clamping,
+// falling back to the defaults when the editor has no parent window.
+func (fc *fanCurveEditor) limits() power.Limits {
+	if fc.w == nil {
+		return power.DefaultLimits()
+	}
+	return fc.w.limits
+}
+
+// tempRange is the editor's x axis, in Celsius.
+func (fc *fanCurveEditor) tempRange() (lo, hi int) {
+	l := fc.limits()
+	return l.TempMin, l.TempMax
+}
 
 // fanFloorPWM returns the minimum fan PWM the daemon will currently accept.
 //
@@ -54,7 +55,7 @@ func (w *Window) fanFloorPWM() int {
 	if w.state == nil || w.state.TDP == nil {
 		return power.PWMMin
 	}
-	return power.FanFloorPWM(w.state.TDP.PL1SPL)
+	return w.limits.FanFloorPWM(w.state.TDP.PL1SPL)
 }
 
 // minPWM is the editor's view of fanFloorPWM, safe when the editor has no parent.
@@ -68,33 +69,35 @@ func (fc *fanCurveEditor) minPWM() int {
 // enforceConstraints repairs the curve after point idx moved. The rules live in
 // internal/power, where they are unit tested.
 func (fc *fanCurveEditor) enforceConstraints(idx int) {
-	fc.points.EnforceConstraints(idx, fc.minPWM())
+	fc.limits().EnforceCurve(&fc.points, idx, fc.minPWM())
 }
 
 // Coordinate mapping.
 func (fc *fanCurveEditor) tempToX(temp int) float64 {
-	return fc.chartX + (float64(temp-35)/70.0)*fc.chartW // 35–105°C range
+	lo, hi := fc.tempRange()
+	return fc.chartX + (float64(temp-lo)/float64(hi-lo))*fc.chartW
 }
 func (fc *fanCurveEditor) pwmToY(pwm int) float64 {
-	return fc.chartY + fc.chartH - (float64(pwm)/255.0)*fc.chartH // inverted
+	return fc.chartY + fc.chartH - (float64(pwm)/float64(power.PWMMax))*fc.chartH // inverted
 }
 func (fc *fanCurveEditor) xToTemp(x float64) int {
-	t := 35 + int(math.Round((x-fc.chartX)/fc.chartW*70.0))
-	if t < 35 {
-		t = 35
+	lo, hi := fc.tempRange()
+	t := lo + int(math.Round((x-fc.chartX)/fc.chartW*float64(hi-lo)))
+	if t < lo {
+		t = lo
 	}
-	if t > 105 {
-		t = 105
+	if t > hi {
+		t = hi
 	}
 	return t
 }
 func (fc *fanCurveEditor) yToPWM(y float64) int {
-	p := int(math.Round((fc.chartY + fc.chartH - y) / fc.chartH * 255.0))
-	if p < 0 {
-		p = 0
+	p := int(math.Round((fc.chartY + fc.chartH - y) / fc.chartH * float64(power.PWMMax)))
+	if p < power.PWMMin {
+		p = power.PWMMin
 	}
-	if p > 255 {
-		p = 255
+	if p > power.PWMMax {
+		p = power.PWMMax
 	}
 	return p
 }
@@ -142,12 +145,13 @@ func (fc *fanCurveEditor) draw(cr *cairo.Context, width, height int) {
 	cr.SetLineWidth(0.5)
 	// Horizontal: 0%, 25%, 50%, 75%, 100%.
 	for _, pct := range []float64{0, 25, 50, 75, 100} {
-		y := fc.pwmToY(int(pct / 100.0 * 255))
+		y := fc.pwmToY(int(pct / 100.0 * power.PWMMax))
 		cr.MoveTo(fc.chartX, y)
 		cr.LineTo(fc.chartX+fc.chartW, y)
 	}
-	// Vertical: every 10°C from 35 to 105.
-	for temp := 35; temp <= 105; temp += 10 {
+	// Vertical: every 10°C across the device's range.
+	tLo, tHi := fc.tempRange()
+	for temp := tLo; temp <= tHi; temp += 10 {
 		x := fc.tempToX(temp)
 		cr.MoveTo(x, fc.chartY)
 		cr.LineTo(x, fc.chartY+fc.chartH)
@@ -159,12 +163,12 @@ func (fc *fanCurveEditor) draw(cr *cairo.Context, width, height int) {
 	cr.SetFontSize(9)
 	// Y-axis labels.
 	for _, pct := range []int{0, 25, 50, 75, 100} {
-		y := fc.pwmToY(int(float64(pct) / 100.0 * 255))
+		y := fc.pwmToY(int(float64(pct) / 100.0 * power.PWMMax))
 		cr.MoveTo(2, y+3)
 		cr.ShowText(fmt.Sprintf("%d%%", pct))
 	}
 	// X-axis labels.
-	for temp := 40; temp <= 100; temp += 20 {
+	for temp := tLo + 5; temp <= tHi-5; temp += 20 {
 		x := fc.tempToX(temp)
 		cr.MoveTo(x-8, fc.chartY+fc.chartH+14)
 		cr.ShowText(fmt.Sprintf("%d°", temp))
@@ -184,13 +188,13 @@ func (fc *fanCurveEditor) draw(cr *cairo.Context, width, height int) {
 		cr.SetDash(nil, 0)
 		cr.SetFontSize(9)
 		cr.MoveTo(fc.chartX+4, fy-4)
-		cr.ShowText(fmt.Sprintf("%d%% min (TDP > %dW)", floor*100/255, tdpMaxSafe))
+		cr.ShowText(fmt.Sprintf("%d%% min (TDP > %dW)", floor*100/power.PWMMax, fc.limits().TDPMaxSafe))
 	}
 
 	// Current APU temperature indicator line.
 	if fc.w != nil && fc.w.state != nil && fc.w.state.Temperature > 0 {
 		apuTemp := fc.w.state.Temperature
-		if apuTemp >= 35 && apuTemp <= 105 {
+		if apuTemp >= tLo && apuTemp <= tHi {
 			tx := fc.tempToX(apuTemp)
 			cr.SetSourceRGBA(1, 1, 1, 0.4)
 			cr.SetLineWidth(1)
@@ -250,7 +254,7 @@ func (w *Window) newFanCurveEditor() *fanCurveEditor {
 		dragging: -1,
 		hovered:  -1,
 		w:        w,
-		points:   defaultFanCurve(),
+		points:   w.limits.DefaultCurve(),
 	}
 
 	fc.area = gtk.NewDrawingArea()
@@ -373,7 +377,7 @@ func (w *Window) buildCustomView() *gtk.Box {
 
 	// Basic TDP box (visible by default).
 	tdpBasicBox := gtk.NewBox(gtk.OrientationVertical, 4)
-	w.tdpBasicScale = gtk.NewScaleWithRange(gtk.OrientationHorizontal, tdpMin, tdpMaxBasic, 1)
+	w.tdpBasicScale = gtk.NewScaleWithRange(gtk.OrientationHorizontal, float64(w.limits.TDPMin), float64(w.limits.BasicSliderMax()), 1)
 	w.tdpBasicScale.SetDigits(0)
 	w.tdpBasicScale.SetDrawValue(false)
 	w.tdpBasicScale.SetValue(float64(50))
@@ -391,7 +395,9 @@ func (w *Window) buildCustomView() *gtk.Box {
 	w.tdpAdvancedBox = gtk.NewBox(gtk.OrientationVertical, 4)
 	w.tdpAdvancedBox.SetVisible(false)
 
-	w.tdpWarningLabel = gtk.NewLabel("WARNING: Values above 75W may cause thermal throttling, instability, or hardware damage. Use at your own risk — we are not responsible for any damages.")
+	w.tdpWarningLabel = gtk.NewLabel(fmt.Sprintf(
+		"WARNING: Values above %dW may cause thermal throttling, instability, or hardware damage. Use at your own risk — we are not responsible for any damages.",
+		w.limits.TDPMaxSafe))
 	w.tdpWarningLabel.SetWrap(true)
 	w.tdpWarningLabel.SetHAlign(gtk.AlignStart)
 	w.tdpWarningLabel.AddCSSClass("tdp-warning")
@@ -514,7 +520,7 @@ func (w *Window) buildTdpScale(label, desc string) (*gtk.Scale, *gtk.Label) {
 	descLabel.SetWrap(true)
 	descLabel.AddCSSClass("scale-value")
 	w.tdpAdvancedBox.Append(descLabel)
-	sc := gtk.NewScaleWithRange(gtk.OrientationHorizontal, tdpMin, tdpMaxAdvanced, 1)
+	sc := gtk.NewScaleWithRange(gtk.OrientationHorizontal, float64(w.limits.TDPMin), float64(w.limits.TDPMaxForced), 1)
 	sc.SetDigits(0)
 	sc.SetDrawValue(false)
 	sc.SetValue(50)
@@ -572,8 +578,8 @@ func (w *Window) syncCustomView() {
 		tdp := w.state.TDP
 		if w.tdpBasicScale != nil {
 			v := float64(tdp.PL1SPL)
-			if v > tdpMaxBasic {
-				v = tdpMaxBasic
+			if m := float64(w.limits.BasicSliderMax()); v > m {
+				v = m
 			}
 			w.tdpBasicScale.SetValue(v)
 			w.tdpBasicLabel.SetLabel(fmt.Sprintf("%d W", int(v)))
@@ -596,15 +602,24 @@ func (w *Window) syncCustomView() {
 		// reports the clamped number, so the drawer claims 70W while the hardware
 		// runs at 80W. Only ever forced on, never off: once the user unchecks it
 		// that is a deliberate choice to edit in basic terms.
-		if w.tdpAdvancedCheck != nil && !w.tdpAdvancedCheck.Active() && power.NeedsAdvanced(*tdp) {
+		if w.tdpAdvancedCheck != nil && !w.tdpAdvancedCheck.Active() &&
+			w.limits.NeedsAdvanced(w.state.Profile, *tdp) {
 			w.tdpAdvancedCheck.SetActive(true)
 		}
 	}
 
-	// Fan curve. Redraw unconditionally, not just when the daemon sent a curve:
-	// the PWM floor line depends on PL1, which may have just changed.
-	if w.state.FanCurve != nil && len(w.state.FanCurve.Points) == 8 && w.fanCurve != nil {
-		copy(w.fanCurve.points[:], w.state.FanCurve.Points)
+	// Fan curve. Only adopt the daemon's points when the fans are actually
+	// following them: on a stock profile the fans are released to firmware auto
+	// but the curve registers still read back the last custom curve, so copying
+	// them unconditionally left the editor showing a curve that was not in force.
+	// Redraw either way — the PWM floor line depends on PL1, which may have just
+	// changed.
+	if w.fanCurve != nil {
+		if power.FanCurveIsCustom(w.state.FanCurve) {
+			copy(w.fanCurve.points[:], w.state.FanCurve.Points)
+		} else {
+			w.fanCurve.points = w.limits.DefaultCurve()
+		}
 	}
 	if w.fanCurve != nil {
 		// A curve saved while the floor was off can sit below it once a high TDP
@@ -622,7 +637,7 @@ func (w *Window) syncCustomView() {
 		if floored {
 			w.resetFanBtn.SetTooltipText(fmt.Sprintf(
 				"Unavailable while sustained TDP is above %dW — fans must stay at %d%% minimum. Use Reset TDP first.",
-				tdpMaxSafe, highTDPMinPWM*100/255))
+				w.limits.TDPMaxSafe, w.limits.HighTDPMinPWM*100/power.PWMMax))
 		} else {
 			w.resetFanBtn.SetTooltipText("Reset fan curves to firmware auto")
 		}
@@ -657,7 +672,7 @@ func (w *Window) sendTdp() error {
 		pl2 := fmt.Sprintf("%d", int(w.tdpPL2Scale.Value()))
 		pl3 := fmt.Sprintf("%d", int(w.tdpPL3Scale.Value()))
 		maxPL := int(math.Max(w.tdpPL1Scale.Value(), math.Max(w.tdpPL2Scale.Value(), w.tdpPL3Scale.Value())))
-		force := maxPL > tdpMaxSafe
+		force := w.limits.ForceRequired(maxPL)
 		_, err := api.SendTdpSet(pl1, pl1, pl2, pl3, force)
 		return err
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/dahui/z13gui/internal/gui/gamepad"
 	"github.com/dahui/z13gui/internal/gui/gamescope"
 	"github.com/dahui/z13gui/internal/gui/layershell"
+	"github.com/dahui/z13gui/internal/power"
 	"github.com/dahui/z13gui/internal/theme"
 	"github.com/dahui/z13gui/internal/togglegate"
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
@@ -63,6 +64,12 @@ type Window struct {
 
 	errBar   *gtk.Box   // error surface; hidden unless an operation failed
 	errLabel *gtk.Label // message shown in errBar
+
+	// limits is the device's power/thermal envelope, driving every TDP and fan
+	// curve bound in the custom view. Defaulted to the Z13's values; when z13ctl
+	// grows an API for serving per-device limits this is the one place that
+	// changes — fetch once at startup, Sanitized, falling back to the defaults.
+	limits power.Limits
 
 	// Widget references for syncState.
 	tabKB           *gtk.CheckButton
@@ -160,6 +167,7 @@ type Window struct {
 func New(app *gtk.Application) *Window {
 	w := &Window{
 		tab:         "keyboard",
+		limits:      power.DefaultLimits(),
 		gamescope:   os.Getenv("GAMESCOPE_WAYLAND_DISPLAY") != "",
 		modeButtons: make(map[string]*gtk.Button),
 		speedBtns:   make(map[string]*gtk.Button),
