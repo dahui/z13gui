@@ -109,7 +109,17 @@ window.z13-drawer-window {
 
 /* TDP warning label */
 .tdp-warning {
-    color: #ff4444;
+    color: @z13-error;
+}
+
+/* Error bar */
+.error-bar {
+    background: @z13-surface;
+    border: 1px solid @z13-error;
+}
+
+.error-bar .error-text {
+    color: @z13-error;
 }
 
 /* Fan curve drawing area */

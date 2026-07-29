@@ -61,6 +61,9 @@ type Window struct {
 	swatchProvider *gtk.CSSProvider // dynamic swatch background colors
 	themeProvider  *gtk.CSSProvider // current theme; replaced on applyTheme()
 
+	errBar   *gtk.Box   // error surface; hidden unless an operation failed
+	errLabel *gtk.Label // message shown in errBar
+
 	// Widget references for syncState.
 	tabKB           *gtk.CheckButton
 	tabLB           *gtk.CheckButton
@@ -254,7 +257,7 @@ func (w *Window) Toggle() {
 					w.syncState()
 				})
 			} else if err != nil {
-				slog.Warn("get state failed", "err", err)
+				w.reportError("Read daemon state", err)
 			}
 		}()
 	}
@@ -295,6 +298,7 @@ func (w *Window) hide() {
 		go w.gamepadReader.UngrabAll()
 	}
 	w.hideGamepadFocus()
+	w.clearError()   // don't greet the next open with a stale failure
 	w.telemetryGen++ // stop any running telemetry poll
 	if w.viewStack != nil {
 		w.viewStack.SetVisibleChildName("main")

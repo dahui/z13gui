@@ -6,112 +6,69 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"strings"
 
 	"github.com/dahui/z13ctl/api"
+	"github.com/dahui/z13gui/internal/power"
 	"github.com/diamondburned/gotk4/pkg/cairo"
 	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
-// TDP limits (matching daemon constants).
+// TDP limits, aliased from internal/power so the widget code reads naturally.
+// The rules themselves — and their tests — live in that package; nothing here
+// should re-derive them.
 const (
-	tdpMin         = 5
-	tdpMaxBasic    = 70 // basic slider max
-	tdpMaxSafe     = 75 // warning threshold
-	tdpMaxAdvanced = 93 // advanced slider max (force=true above 75)
+	tdpMin         = power.TDPMin
+	tdpMaxBasic    = power.TDPMaxBasic    // basic slider max
+	tdpMaxSafe     = power.TDPMaxSafe     // warning threshold; also the fan floor trigger
+	tdpMaxAdvanced = power.TDPMaxAdvanced // advanced slider max (force=true above 75)
+	highTDPMinPWM  = power.HighTDPMinPWM  // 80% fan floor above tdpMaxSafe
 )
 
 // fanCurveEditor renders and handles interaction for the 8-point fan curve.
+// The curve model and its constraint rules live in internal/power; this type
+// owns only the drawing and pointer handling.
 type fanCurveEditor struct {
 	area     *gtk.DrawingArea
-	points   [8]api.FanCurvePoint // temp: 0–120°C, pwm: 0–255
-	dragging int                  // point index being dragged, -1 if none
-	hovered  int                  // point index under cursor, -1 if none
-	w        *Window              // parent for theme colors + telemetry
+	points   power.Curve // 8 points; temp 35–105°C, pwm 0–255
+	dragging int         // point index being dragged, -1 if none
+	hovered  int         // point index under cursor, -1 if none
+	w        *Window     // parent for theme colors + telemetry
 
 	// Chart area within the DrawingArea (set during draw).
 	chartX, chartY, chartW, chartH float64
 }
 
 // defaultFanCurve returns a reasonable default fan curve.
-func defaultFanCurve() [8]api.FanCurvePoint {
-	return [8]api.FanCurvePoint{
-		{Temp: 35, PWM: 0},
-		{Temp: 45, PWM: 25},
-		{Temp: 50, PWM: 50},
-		{Temp: 60, PWM: 80},
-		{Temp: 70, PWM: 120},
-		{Temp: 80, PWM: 170},
-		{Temp: 90, PWM: 220},
-		{Temp: 100, PWM: 255},
-	}
-}
+func defaultFanCurve() power.Curve { return power.DefaultCurve() }
 
 // curveString returns the curve in "temp:pwm,temp:pwm,..." format for the API.
-func (fc *fanCurveEditor) curveString() string {
-	var parts []string
-	for _, p := range fc.points {
-		parts = append(parts, fmt.Sprintf("%d:%d", p.Temp, p.PWM))
+func (fc *fanCurveEditor) curveString() string { return fc.points.String() }
+
+// fanFloorPWM returns the minimum fan PWM the daemon will currently accept.
+//
+// Derived from the daemon's applied state rather than the slider position: the
+// daemon validates against hardware, and a slider the user has moved but not
+// saved has not been applied. Must be called from the GTK main thread.
+func (w *Window) fanFloorPWM() int {
+	if w.state == nil || w.state.TDP == nil {
+		return power.PWMMin
 	}
-	return strings.Join(parts, ",")
+	return power.FanFloorPWM(w.state.TDP.PL1SPL)
 }
 
-// enforceConstraints ensures temps are strictly increasing and PWM non-decreasing.
-func (fc *fanCurveEditor) enforceConstraints(idx int) {
-	// Clamp the dragged point first.
-	if fc.points[idx].Temp < 35 {
-		fc.points[idx].Temp = 35
+// minPWM is the editor's view of fanFloorPWM, safe when the editor has no parent.
+func (fc *fanCurveEditor) minPWM() int {
+	if fc.w == nil {
+		return power.PWMMin
 	}
-	if fc.points[idx].Temp > 105 {
-		fc.points[idx].Temp = 105
-	}
-	if fc.points[idx].PWM < 0 {
-		fc.points[idx].PWM = 0
-	}
-	if fc.points[idx].PWM > 255 {
-		fc.points[idx].PWM = 255
-	}
+	return fc.w.fanFloorPWM()
+}
 
-	// Cascade temps forward (must be strictly increasing).
-	for i := idx + 1; i < 8; i++ {
-		if fc.points[i].Temp <= fc.points[i-1].Temp {
-			fc.points[i].Temp = fc.points[i-1].Temp + 1
-		}
-	}
-	// Cascade temps backward.
-	for i := idx - 1; i >= 0; i-- {
-		if fc.points[i].Temp >= fc.points[i+1].Temp {
-			fc.points[i].Temp = fc.points[i+1].Temp - 1
-		}
-	}
-	// Cascade PWM forward (must be non-decreasing).
-	for i := idx + 1; i < 8; i++ {
-		if fc.points[i].PWM < fc.points[i-1].PWM {
-			fc.points[i].PWM = fc.points[i-1].PWM
-		}
-	}
-	// Cascade PWM backward.
-	for i := idx - 1; i >= 0; i-- {
-		if fc.points[i].PWM > fc.points[i+1].PWM {
-			fc.points[i].PWM = fc.points[i+1].PWM
-		}
-	}
-	// Final clamp pass.
-	for i := range fc.points {
-		if fc.points[i].Temp < 35 {
-			fc.points[i].Temp = 35
-		}
-		if fc.points[i].Temp > 105 {
-			fc.points[i].Temp = 105
-		}
-		if fc.points[i].PWM < 0 {
-			fc.points[i].PWM = 0
-		}
-		if fc.points[i].PWM > 255 {
-			fc.points[i].PWM = 255
-		}
-	}
+// enforceConstraints repairs the curve after point idx moved. The rules live in
+// internal/power, where they are unit tested.
+func (fc *fanCurveEditor) enforceConstraints(idx int) {
+	fc.points.EnforceConstraints(idx, fc.minPWM())
 }
 
 // Coordinate mapping.
@@ -211,6 +168,23 @@ func (fc *fanCurveEditor) draw(cr *cairo.Context, width, height int) {
 		x := fc.tempToX(temp)
 		cr.MoveTo(x-8, fc.chartY+fc.chartH+14)
 		cr.ShowText(fmt.Sprintf("%d°", temp))
+	}
+
+	// High-TDP fan floor. While sustained TDP is above the safe max the daemon
+	// rejects any point below this line, and enforceConstraints holds drags at or
+	// above it — drawing it explains why the points will not go lower.
+	if floor := fc.minPWM(); floor > 0 {
+		fy := fc.pwmToY(floor)
+		cr.SetSourceRGBA(1, 0.27, 0.27, 0.9) // matches .tdp-warning red
+		cr.SetLineWidth(1.5)
+		cr.SetDash([]float64{6, 3}, 0)
+		cr.MoveTo(fc.chartX, fy)
+		cr.LineTo(fc.chartX+fc.chartW, fy)
+		cr.Stroke()
+		cr.SetDash(nil, 0)
+		cr.SetFontSize(9)
+		cr.MoveTo(fc.chartX+4, fy-4)
+		cr.ShowText(fmt.Sprintf("%d%% min (TDP > %dW)", floor*100/255, tdpMaxSafe))
 	}
 
 	// Current APU temperature indicator line.
@@ -616,12 +590,42 @@ func (w *Window) syncCustomView() {
 			w.tdpPL3Scale.SetValue(float64(tdp.FPPT))
 			w.tdpPL3Label.SetLabel(fmt.Sprintf("%d W", tdp.FPPT))
 		}
+
+		// Switch to the advanced view when the applied TDP cannot be expressed in
+		// basic mode. Otherwise the basic slider silently clamps and its label
+		// reports the clamped number, so the drawer claims 70W while the hardware
+		// runs at 80W. Only ever forced on, never off: once the user unchecks it
+		// that is a deliberate choice to edit in basic terms.
+		if w.tdpAdvancedCheck != nil && !w.tdpAdvancedCheck.Active() && power.NeedsAdvanced(*tdp) {
+			w.tdpAdvancedCheck.SetActive(true)
+		}
 	}
 
-	// Fan curve.
+	// Fan curve. Redraw unconditionally, not just when the daemon sent a curve:
+	// the PWM floor line depends on PL1, which may have just changed.
 	if w.state.FanCurve != nil && len(w.state.FanCurve.Points) == 8 && w.fanCurve != nil {
 		copy(w.fanCurve.points[:], w.state.FanCurve.Points)
+	}
+	if w.fanCurve != nil {
+		// A curve saved while the floor was off can sit below it once a high TDP
+		// is applied. Lift it so what is drawn is what the daemon would accept.
+		w.fanCurve.enforceConstraints(0)
 		w.fanCurve.area.QueueDraw()
+	}
+
+	// Reset Fans is refused by the daemon while the high-TDP floor is in force —
+	// firmware auto has no floor, so releasing the fans there would remove the
+	// protection the power limit requires. Reset TDP is the way out.
+	if w.resetFanBtn != nil {
+		floored := w.fanFloorPWM() > 0
+		w.resetFanBtn.SetSensitive(!floored)
+		if floored {
+			w.resetFanBtn.SetTooltipText(fmt.Sprintf(
+				"Unavailable while sustained TDP is above %dW — fans must stay at %d%% minimum. Use Reset TDP first.",
+				tdpMaxSafe, highTDPMinPWM*100/255))
+		} else {
+			w.resetFanBtn.SetTooltipText("Reset fan curves to firmware auto")
+		}
 	}
 
 	// Undervolt.
@@ -672,27 +676,35 @@ func (w *Window) sendFanCurve() error {
 }
 
 // refreshProfile fetches state and updates the profile button highlight.
-func (w *Window) refreshProfile() {
+// refreshState fetches daemon state and re-syncs both the custom view and the
+// profile buttons. Every custom-profile operation uses it rather than syncing the
+// profile alone: the fan curve editor's PWM floor is derived from the applied
+// PL1, so a TDP change has to re-evaluate the whole view, not just the highlight.
+// Safe to call from a background goroutine.
+func (w *Window) refreshState() {
 	ok, state, err := api.SendGetState()
-	if ok && err == nil {
-		glib.IdleAdd(func() {
-			w.state = state
-			w.syncing = true
-			w.syncProfile()
-			w.syncing = false
-		})
+	if !ok || err != nil {
+		return
 	}
+	glib.IdleAdd(func() {
+		w.state = state
+		w.syncCustomView()
+		w.syncing = true
+		w.syncProfile()
+		w.syncing = false
+	})
 }
 
 // saveCustomTdp commits only the TDP values.
 func (w *Window) saveCustomTdp() {
 	go func() {
 		if err := w.sendTdp(); err != nil {
-			slog.Warn("tdp set failed", "err", err)
+			w.reportError("Save TDP", err)
 			return
 		}
+		w.clearErrorAsync()
 		slog.Info("custom TDP saved")
-		w.refreshProfile()
+		w.refreshState()
 	}()
 }
 
@@ -700,11 +712,12 @@ func (w *Window) saveCustomTdp() {
 func (w *Window) saveCustomFanCurve() {
 	go func() {
 		if err := w.sendFanCurve(); err != nil {
-			slog.Warn("fan curve set failed", "err", err)
+			w.reportError("Save fan curve", err)
 			return
 		}
+		w.clearErrorAsync()
 		slog.Info("custom fan curve saved")
-		w.refreshProfile()
+		w.refreshState()
 	}()
 }
 
@@ -713,16 +726,18 @@ func (w *Window) saveCustomBoth() {
 	go func() {
 		tdpErr := w.sendTdp()
 		fanErr := w.sendFanCurve()
-		if tdpErr != nil {
-			slog.Warn("tdp set failed", "err", tdpErr)
-		}
-		if fanErr != nil {
-			slog.Warn("fan curve set failed", "err", fanErr)
-		}
-		if tdpErr == nil && fanErr == nil {
+		switch {
+		case tdpErr != nil:
+			// TDP first: a rejected TDP is usually why the fan write failed too
+			// (the daemon refuses a curve below the 80% floor while PL1 is high).
+			w.reportError("Save TDP", tdpErr)
+		case fanErr != nil:
+			w.reportError("Save fan curve", fanErr)
+		default:
+			w.clearErrorAsync()
 			slog.Info("custom profile saved (TDP + fans)")
 		}
-		w.refreshProfile()
+		w.refreshState()
 	}()
 }
 
@@ -730,20 +745,12 @@ func (w *Window) saveCustomBoth() {
 func (w *Window) resetTdp() {
 	go func() {
 		if _, err := api.SendTdpReset(); err != nil {
-			slog.Warn("tdp reset failed", "err", err)
+			w.reportError("Reset TDP", err)
 			return
 		}
+		w.clearErrorAsync()
 		slog.Info("tdp reset to defaults")
-		ok, state, err := api.SendGetState()
-		if ok && err == nil {
-			glib.IdleAdd(func() {
-				w.state = state
-				w.syncCustomView()
-				w.syncing = true
-				w.syncProfile()
-				w.syncing = false
-			})
-		}
+		w.refreshState()
 	}()
 }
 
@@ -751,20 +758,14 @@ func (w *Window) resetTdp() {
 func (w *Window) resetFanCurve() {
 	go func() {
 		if _, err := api.SendFanCurveReset(); err != nil {
-			slog.Warn("fan curve reset failed", "err", err)
+			// The daemon refuses this while sustained TDP is above the safe max —
+			// firmware auto has no PWM floor. Reset TDP is the way out.
+			w.reportError("Reset fans", err)
 			return
 		}
+		w.clearErrorAsync()
 		slog.Info("fan curve reset to auto")
-		ok, state, err := api.SendGetState()
-		if ok && err == nil {
-			glib.IdleAdd(func() {
-				w.state = state
-				w.syncCustomView()
-				w.syncing = true
-				w.syncProfile()
-				w.syncing = false
-			})
-		}
+		w.refreshState()
 	}()
 }
 
@@ -773,11 +774,12 @@ func (w *Window) saveUndervolt() {
 	go func() {
 		cpu := fmt.Sprintf("%d", int(w.uvCpuScale.Value()))
 		if _, err := api.SendUndervoltSet(cpu); err != nil {
-			slog.Warn("undervolt set failed", "err", err)
+			w.reportError("Save undervolt", err)
 			return
 		}
+		w.clearErrorAsync()
 		slog.Info("undervolt saved", "cpu", cpu)
-		w.refreshProfile()
+		w.refreshState()
 	}()
 }
 
@@ -785,20 +787,12 @@ func (w *Window) saveUndervolt() {
 func (w *Window) resetUndervolt() {
 	go func() {
 		if _, err := api.SendUndervoltReset(); err != nil {
-			slog.Warn("undervolt reset failed", "err", err)
+			w.reportError("Reset undervolt", err)
 			return
 		}
+		w.clearErrorAsync()
 		slog.Info("undervolt reset to stock")
-		ok, state, err := api.SendGetState()
-		if ok && err == nil {
-			glib.IdleAdd(func() {
-				w.state = state
-				w.syncCustomView()
-				w.syncing = true
-				w.syncProfile()
-				w.syncing = false
-			})
-		}
+		w.refreshState()
 	}()
 }
 
@@ -865,7 +859,7 @@ func (w *Window) buildCustomFocusList() {
 			widget: w.tdpBasicScale, row: 1, col: 0,
 			section:  "tdp",
 			editable: true,
-			onLeft: oL, onRight: oR,
+			onLeft:   oL, onRight: oR,
 			getValue: gV, setValue: sV,
 			isVisible: func() bool { return w.tdpBasicScale.IsVisible() },
 		})
@@ -889,7 +883,7 @@ func (w *Window) buildCustomFocusList() {
 			section:   "tdp",
 			editable:  true,
 			isVisible: advVis,
-			onLeft: oL, onRight: oR,
+			onLeft:    oL, onRight: oR,
 			getValue: gV, setValue: sV,
 		})
 	}
@@ -897,7 +891,7 @@ func (w *Window) buildCustomFocusList() {
 	// Row 6: fan curve (editable with custom behavior).
 	if w.fanCurve != nil {
 		items = append(items, focusItem{
-			widget:  w.fanCurve.area, row: 6, col: 0,
+			widget: w.fanCurve.area, row: 6, col: 0,
 			section: "fan",
 			// Fan curve is navigable but not editable via gamepad in this first pass.
 			// Touch/mouse drag handles interaction.

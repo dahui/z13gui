@@ -94,6 +94,9 @@ text_dim = "#888888"
 
 # Border color — window outline and separators
 border = "#444444"
+
+# Error color — error bar text and border, high-TDP warning text
+error = "#ff4444"
 ```
 
 Comments, inline comments, unknown keys, and missing keys are all handled
@@ -143,6 +146,7 @@ selected.
 | `text` | `@z13-text` | Primary text, labels, button text |
 | `text_dim` | `@z13-text-dim` | Section headings (MODE, SPEED, etc.), secondary labels |
 | `border` | `@z13-border` | Drawer border, separators, button outlines |
+| `error` | `@z13-error` | Error bar text and border, high-TDP warning text |
 
 ---
 
@@ -174,7 +178,7 @@ All four Catppuccin themes support the 14 official accent colors:
 For complete control, provide a full GTK4 CSS stylesheet at
 `~/.config/z13gui/theme.css`. This replaces the built-in theme CSS entirely.
 
-The stylesheet should define all 7 `@define-color` variables:
+The stylesheet should define all 8 `@define-color` variables:
 
 ```css
 @define-color z13-accent      #cc0000;
@@ -184,6 +188,7 @@ The stylesheet should define all 7 `@define-color` variables:
 @define-color z13-text        #e0e0e0;
 @define-color z13-text-dim    #888888;
 @define-color z13-border      #444444;
+@define-color z13-error       #ff4444;
 ```
 
 You can then add any GTK4 CSS rules. `theme.toml` takes priority over

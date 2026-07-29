@@ -46,6 +46,7 @@ surface_alt = "#333333"
 text = "#eeeeee"
 text_dim = "#999999"
 border = "#555555"
+error = "#ff8888"
 `)
 	c := ParseThemeTOML(data)
 	if c.Accent != "#ff0000" {
@@ -68,6 +69,31 @@ border = "#555555"
 	}
 	if c.Border != "#555555" {
 		t.Errorf("Border = %q, want #555555", c.Border)
+	}
+	if c.Error != "#ff8888" {
+		t.Errorf("Error = %q, want #ff8888", c.Error)
+	}
+}
+
+// A theme.toml written before the error color existed must keep working: the
+// parser starts from DefaultColors, so the missing key inherits the default
+// rather than producing an empty @define-color that would break the stylesheet.
+func TestParseThemeTOML_PreErrorKeyThemeStillWorks(t *testing.T) {
+	data := []byte(`
+accent = "#ff0000"
+background = "#111111"
+surface = "#222222"
+surface_alt = "#333333"
+text = "#eeeeee"
+text_dim = "#999999"
+border = "#555555"
+`)
+	c := ParseThemeTOML(data)
+	if c.Error != DefaultColors.Error {
+		t.Errorf("Error = %q, want default %q", c.Error, DefaultColors.Error)
+	}
+	if !IsHexColor(c.Error) {
+		t.Errorf("Error = %q is not a valid hex color; generated CSS would be malformed", c.Error)
 	}
 }
 

@@ -35,6 +35,26 @@
     margin-bottom: 4px;
 }
 
+/* Error bar — sits between the view stack and the bottom bar, hidden until an
+   operation fails. Wraps rather than truncating: daemon messages name the sysfs
+   path or the exact constraint that was violated, which is the useful part. */
+.error-bar {
+    padding: 6px 8px;
+    margin: 0 8px 4px 8px;
+    border-radius: 6px;
+}
+
+.error-bar .error-text {
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.error-bar .error-dismiss {
+    min-height: 20px;
+    min-width: 20px;
+    padding: 0;
+}
+
 /* Fan curve drawing area */
 .fan-curve-area {
     min-height: 240px;

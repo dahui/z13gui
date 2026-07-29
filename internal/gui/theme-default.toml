@@ -25,3 +25,7 @@ text_dim = "#888888"
 
 # Border color — window outline and separators
 border = "#444444"
+
+# Error color — error bar text and border, high-TDP warning text.
+# Omitting this key keeps the default, so older theme.toml files still work.
+error = "#ff4444"

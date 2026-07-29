@@ -12,11 +12,12 @@ func TestBuildThemeCSS_ContainsDefineColors(t *testing.T) {
 	expected := []string{
 		"@define-color z13-accent",
 		"@define-color z13-bg",
-		"@define-color z13-surface ",     // trailing space to distinguish from z13-surface-alt
+		"@define-color z13-surface ", // trailing space to distinguish from z13-surface-alt
 		"@define-color z13-surface-alt",
-		"@define-color z13-text ",         // trailing space to distinguish from z13-text-dim
+		"@define-color z13-text ", // trailing space to distinguish from z13-text-dim
 		"@define-color z13-text-dim",
 		"@define-color z13-border",
+		"@define-color z13-error",
 	}
 	for _, exp := range expected {
 		if !strings.Contains(css, exp) {
@@ -34,9 +35,10 @@ func TestBuildThemeCSS_ContainsColorValues(t *testing.T) {
 		Text:       "#eeeeee",
 		TextDim:    "#999999",
 		Border:     "#555555",
+		Error:      "#ff8888",
 	}
 	css := BuildThemeCSS(c, "")
-	for _, hex := range []string{"#ff0000", "#111111", "#222222", "#333333", "#eeeeee", "#999999", "#555555"} {
+	for _, hex := range []string{"#ff0000", "#111111", "#222222", "#333333", "#eeeeee", "#999999", "#555555", "#ff8888"} {
 		if !strings.Contains(css, hex) {
 			t.Errorf("output missing color value %s", hex)
 		}

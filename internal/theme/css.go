@@ -17,8 +17,9 @@ func BuildThemeCSS(c Colors, templateCSS string) string {
 			"@define-color z13-surface-alt %s;\n"+
 			"@define-color z13-text        %s;\n"+
 			"@define-color z13-text-dim    %s;\n"+
-			"@define-color z13-border      %s;\n",
-		c.Accent, c.Background, c.Surface, c.SurfaceAlt, c.Text, c.TextDim, c.Border,
+			"@define-color z13-border      %s;\n"+
+			"@define-color z13-error       %s;\n",
+		c.Accent, c.Background, c.Surface, c.SurfaceAlt, c.Text, c.TextDim, c.Border, c.Error,
 	)
 	return defs + "\n" + StripDefineColors(templateCSS)
 }

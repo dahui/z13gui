@@ -72,7 +72,8 @@ make lint      # run golangci-lint
 make test      # run unit tests (pure Go, no GTK4 required)
 ```
 
-Tests live in the pure-Go packages (`internal/theme`, `internal/togglegate`) — no
+Tests live in the pure-Go packages (`internal/power`, `internal/theme`,
+`internal/togglegate`) — no
 hardware or GTK4 dependency. GUI packages are integration-tested manually against
 hardware.
 
@@ -90,6 +91,7 @@ and should include tests for any changes to the pure-Go packages.
 
 - `internal/theme` — fully unit-testable; covers color parsing, CSS generation,
   config persistence, and all 78 built-in theme/accent combinations
+- `internal/power` — TDP limits and fan curve rules; 100% covered
 - `internal/togglegate` — pure debounce helper for duplicate `gui-toggle` bursts
 - `internal/gui` — requires GTK4; integration-tested manually against hardware
 - Display backends (layershell, gamescope) — require a compositor or gamescope;

@@ -110,6 +110,10 @@ func (w *Window) buildContent() gtk.Widgetter {
 	w.viewStack.SetVisibleChildName("main")
 	outer.Append(w.viewStack)
 
+	// Error bar sits outside the stack so a failure raised in any view stays
+	// visible, including after a view switch.
+	outer.Append(w.buildErrorBar())
+
 	outer.Append(w.buildBottomBar())
 
 	w.buildMainFocusList()

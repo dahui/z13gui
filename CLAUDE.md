@@ -17,7 +17,7 @@ It has two display backends:
 ## Companion project: z13ctl
 
 The `z13ctl` daemon (module `github.com/dahui/z13ctl`) is a sibling repo.
-Its `api/` submodule (`github.com/dahui/z13ctl/api`) is published at tag `api/v1.1.6`
+Its `api/` submodule (`github.com/dahui/z13ctl/api`) is published at tag `api/v1.1.7`
 on GitHub.
 
 During local development, a `go.work` file in this repo (if present, gitignored) provides
@@ -36,6 +36,7 @@ internal/gui/
   tdp.go                        Custom profile view: TDP sliders, fan curve editor, undervolt, telemetry
   sync.go                       Daemon state sync and API send functions
   color.go                      colorInput struct, HSL conversion, color picker view logic
+  errbar.go                     Error bar: reportError/clearError, the only user-facing error surface
   focus.go                      2D grid gamepad focus navigation + modal slider editing
   log.go                        Split-level slog handler (app vs GTK noise filtering)
   layout.css                    Embedded structural CSS (touch targets, sizing) — PRIORITY_APPLICATION
@@ -59,9 +60,16 @@ internal/gui/gamepad/hidblocker/
 internal/gui/gamescope/
   gamescope.go                  Gamescope X11 overlay backend (Steam Gaming Mode)
 internal/theme/
-  theme.go                      Theme types, TOML parsing, CSS generation, config persistence
-  builtins.go                   15 built-in themes (8 dark, 7 light) with accent variants
-  theme_test.go                 Theme parsing and CSS generation tests
+  theme.go                      Colors struct (8 tokens), 15 built-in themes, accent variants
+  parse.go                      theme.toml parsing; starts from DefaultColors so missing keys
+                                inherit defaults — this is what keeps old theme.toml files working
+                                when a new color token is added
+  css.go                        @define-color generation from a Colors value
+  config.go                     Config persistence (selected theme/accent)
+  *_test.go                     Theme parsing, CSS generation, and built-in completeness tests
+internal/power/
+  power.go                      TDP limits + fan curve rules (pure; mirrors z13ctl internal/cli)
+  power_test.go                 Unit tests (pure Go, no GTK4) — 100% coverage
 internal/togglegate/
   togglegate.go                 Pure debounce helper for duplicate gui-toggle bursts
   togglegate_test.go            Unit tests (pure Go, no GTK4)
@@ -111,6 +119,33 @@ contrib/
 - **State source of truth**: daemon is the source of truth. On show, `api.SendGetState()`
   is called and `syncState()` updates widgets. Widget signals are suppressed during sync
   via `Window.syncing bool`.
+- **Error surface** (`errbar.go`): every daemon call reports failures through
+  `w.reportError(op, err)` and clears on success with `clearError()`/`clearErrorAsync()`.
+  The bar is appended to `outer` between `viewStack` and the bottom bar, so one instance
+  covers all four views in both backends. **Never drop a daemon error into `slog` alone** —
+  that is what made z13ctl issue #14 look like a dead button for weeks. `reportError` is
+  safe from any goroutine (it marshals via `glib.IdleAdd`) and logs internally, so call
+  sites should not also `slog.Warn`.
+- **Daemon calls must not run on the GTK thread**: `api` commands carry a 10s deadline
+  (`commandTimeout`, api v1.1.7), so an inline call freezes the drawer for up to 10s
+  against a wedged daemon. Read widget values on the main thread, then do the socket
+  round-trip in a goroutine — see `sendApply()` in `sync.go` for the pattern.
+- **Pure rules live in `internal/power`, not in the widget code.** `internal/gui`
+  needs CGO + GTK4 headers so it cannot be unit tested; anything that is a *decision*
+  rather than a *widget* belongs in `power` where it is covered by tests. Currently:
+  the TDP limits, `NeedsAdvanced`, `FanFloorPWM`, `ForceRequired`, and the `Curve`
+  type with `EnforceConstraints`/`String`. `tdp.go` aliases the constants and
+  delegates. Add new rules there, with tests, rather than inline in `tdp.go`.
+- **High-TDP fan floor**: while sustained PL1 exceeds 75W the daemon rejects any fan
+  curve point below 204 PWM (80%) and refuses a fan reset outright. `fanFloorPWM()`
+  derives this from applied daemon state (not slider position); `enforceConstraints`
+  clamps drags to it, `fanCurveEditor.draw` renders the floor line, and `resetFanBtn` is
+  desensitized with a tooltip pointing at Reset TDP.
+- **Basic vs advanced TDP view**: basic mode is one slider applying a single value to
+  all three limits, capped at 70W. `power.NeedsAdvanced` decides whether a state can be
+  shown there; `syncCustomView` force-checks the Advanced box when it cannot. Without
+  that the slider clamps, the label misreports the hardware, and a save sends the
+  clamped value — silently lowering the user's power limit.
 - **Subscribe loop**: background goroutine, exponential backoff reconnect, dispatches
   `Toggle()` onto the GTK main thread via `glib.TimeoutAdd(0, ...)` followed by
   `MainContextDefault().Wakeup()` (the wakeup is required — the loop may deliver an
@@ -142,6 +177,8 @@ contrib/
     - `.section-label` — section headers ("TDP", "UNDERVOLT", "FAN CURVE"): 11px, bold, letter-spaced, dim
     - `.scale-name` — slider name labels ("PL1 (SPL)", "CPU Curve Optimizer"): 10px, bold, no letter-spacing, dim
     - `.scale-value` — slider value readouts ("50 W", "CPU CO: -20"): 10px, normal weight, bright
+    - `.error-bar` / `.error-text` / `.error-dismiss` — error surface; colored via the
+      `@z13-error` theme token, as is `.tdp-warning`
 - **Profile selector**: buttons (`gtk.Button`), stored in
   `w.profileBtns map[string]*gtk.Button`. Not DropDown (popup broken in gamescope).
 - **Focus-loss dismiss** (layer-shell): `EventControllerMotion` tracks `pointerInside`
@@ -273,10 +310,15 @@ make release    # goreleaser build + publish
 
 Requires at build time: `gtk4-layer-shell` C library (`pkg-config gtk4-layer-shell-0`).
 
-`make test` enumerates the pure-Go packages explicitly (`internal/theme`,
-`internal/togglegate`) rather than using `./...`, because `internal/gui` needs CGO and
-GTK4 headers. **Add new pure-Go packages to the `test` and `cover` targets** — otherwise
-their tests never run; there is no CI test job (the only workflow is release).
+`make test` enumerates the pure-Go packages explicitly (`internal/power`,
+`internal/theme`, `internal/togglegate`) rather than using `./...`, because
+`internal/gui` needs CGO and GTK4 headers. **Add new pure-Go packages to the `test` and
+`cover` targets** — otherwise their tests never run; there is no CI test job (the only
+workflow is release).
+
+Because `internal/gui` is untestable, prefer extracting logic into a pure package over
+leaving it inline — see `internal/power`. That extraction immediately caught a live bug
+in the fan curve constraint cascade that had shipped unnoticed.
 
 ## Known GTK issues (do not re-introduce)
 

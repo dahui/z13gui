@@ -71,6 +71,8 @@ func ParseThemeTOMLFull(data []byte) (Colors, []Accent) {
 			c.TextDim = v
 		case "border":
 			c.Border = v
+		case "error":
+			c.Error = v
 		}
 	}
 	return c, accents

@@ -12,11 +12,11 @@ build:
 
 ## test: run unit tests (pure Go; no GTK4 headers required)
 test:
-	go test ./internal/theme/... ./internal/togglegate/...
+	go test ./internal/power/... ./internal/theme/... ./internal/togglegate/...
 
 ## cover: run tests with coverage report
 cover:
-	go test -coverprofile=coverage.out ./internal/theme/... ./internal/togglegate/...
+	go test -coverprofile=coverage.out ./internal/power/... ./internal/theme/... ./internal/togglegate/...
 	go tool cover -func=coverage.out
 
 ## lint: run golangci-lint
