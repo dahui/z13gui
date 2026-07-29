@@ -287,16 +287,31 @@ The gamescope backend renders z13gui as an X11 overlay in Steam Gaming Mode.
 - **Popups don't work**: GTK4 popovers/dropdowns create separate X11 windows that
   gamescope doesn't composite. Solved via view switching (see below).
 
-### View switching (gamescope only)
+### View switching
 
-In both KDE and gamescope modes, `buildContent()` wraps content in a `gtk.Stack` with 4 pages:
+`buildContent()` wraps content in a `gtk.Stack` with 4 pages, in **both** backends:
 - `"main"` — normal drawer (profiles, RGB, battery, etc.)
 - `"custom"` — custom profile view (TDP, fan curve, undervolt, telemetry)
-- `"theme"` — theme picker (radio buttons + accent dots, replaces popover in gamescope)
-- `"color"` — HSL color picker (H/S/L sliders + presets + preview, replaces popover in gamescope)
+- `"theme"` — theme picker (radio buttons + accent dots)
+- `"color"` — HSL color picker (H/S/L sliders + presets + preview)
 
 Bottom bar stays visible across all views. `hide()` resets to "main".
-In KDE mode, theme/color views use popovers instead of stack pages.
+
+**There are no popovers left anywhere.** The stack replaced them in both modes
+(`e19f76f`, which added gamepad support) because one navigable widget tree is what
+makes gamepad focus work identically in both backends — not only because popovers
+are uncompositable under gamescope. `grep Popover internal/` returns nothing, and
+it should stay that way; reintroducing one would need a second focus-list mechanism
+and would be invisible in Gaming Mode.
+
+That conversion left CSS behind, which is worth knowing about because it hid a real
+regression for months: `popover.z13-popover` rules (12 of them) and
+`.bottom-bar menubutton > button` outlived the widgets they selected, and the
+latter was the theme-picker button's only colour styling — so it silently fell back
+to stock GTK colours and stopped following the theme. Both are now removed, with
+`.bottom-bar button` / `.view-back-btn` styled directly. **When a widget type
+changes, grep the CSS for its element selector**: a rule that no longer matches
+fails silently and looks like a theming gap rather than dead code.
 
 ### Service environment
 
@@ -411,7 +426,9 @@ executed.
 - **`box-shadow` on animated containers** — shadow pixels extend outside the widget clip
   region and are not cleared each frame in Wayland Vulkan rendering, causing smearing.
 - **GTK4 popovers in gamescope** — create separate override-redirect X11 windows that
-  gamescope doesn't composite. Use `gtk.Stack` view switching instead (gamescope only).
+  gamescope doesn't composite. Use `gtk.Stack` view switching instead, in **both**
+  backends: one widget tree is what lets the gamepad focus grid work the same way in
+  each, so a KDE-only popover would still be the wrong answer.
 - **GDK_SCALE in gamescope** — causes double scaling (GTK scales buffer, then gamescope
   scaler scales again). Use manual CSS scaling via `scaledCSS()` instead.
 - **GtkDropDown in gamescope** — popup list is a separate X11 window. Use buttons or

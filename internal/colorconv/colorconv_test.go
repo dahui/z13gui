@@ -300,3 +300,55 @@ func TestNormalizeStillRejectsAlphaForms(t *testing.T) {
 		}
 	}
 }
+
+// TestHSLRoundTrip is the invariant the colour picker rests on: opening it sets
+// the sliders from the stored hex, and every slider change converts straight back.
+// Any drift would mean a colour that shifts when the user opens the picker and
+// nudges a slider back to where it started.
+//
+// Verified exact across the sampled space rather than approximately, because there
+// is no rounding budget to spend — the daemon stores the hex the drawer sends.
+func TestHSLRoundTrip(t *testing.T) {
+	// Prime stride so the samples do not align with channel boundaries.
+	for v := 0; v <= 0xFFFFFF; v += 4993 {
+		hex := fmt.Sprintf("%06X", v)
+		h, s, l, ok := HexToHSL(hex)
+		if !ok {
+			t.Fatalf("HexToHSL(%q) not ok", hex)
+		}
+		if back := HSLToHex(h, s, l); back != hex {
+			t.Errorf("round trip drifted: %s -> H%.4f S%.4f L%.4f -> %s", hex, h, s, l, back)
+		}
+	}
+}
+
+// The greys are the interesting case: saturation is undefined there, so hue is
+// reported as 0 and has to be reconstructed without shifting the colour.
+func TestHSLRoundTripGreys(t *testing.T) {
+	for c := 0; c <= 0xFF; c++ {
+		hex := fmt.Sprintf("%02X%02X%02X", c, c, c)
+		h, s, l, ok := HexToHSL(hex)
+		if !ok {
+			t.Fatalf("HexToHSL(%q) not ok", hex)
+		}
+		if s != 0 {
+			t.Errorf("%s: saturation = %v, want 0 for a grey", hex, s)
+		}
+		if back := HSLToHex(h, s, l); back != hex {
+			t.Errorf("grey round trip drifted: %s -> %s", hex, back)
+		}
+	}
+}
+
+// Every preset and swatch default a user can actually click.
+func TestHSLRoundTripPresets(t *testing.T) {
+	for _, hex := range []string{
+		"FF0000", "FF6600", "FFFF00", "00FF00",
+		"00FFFF", "0000FF", "FF00FF", "FFFFFF", "000000",
+	} {
+		h, s, l, _ := HexToHSL(hex)
+		if back := HSLToHex(h, s, l); back != hex {
+			t.Errorf("preset %s round-tripped to %s", hex, back)
+		}
+	}
+}

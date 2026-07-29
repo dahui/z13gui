@@ -165,7 +165,16 @@
     border-radius: 6px;
 }
 
-/* Accent label in theme picker popover */
+/* Back button in the custom, theme and colour views. Sized here as well as in
+   the gamescope scaled CSS so the two backends agree at scale 1. */
+.view-back-btn {
+    min-width: 32px;
+    min-height: 32px;
+    padding: 4px;
+    border-radius: 6px;
+}
+
+/* Accent label in the theme picker */
 .accent-label {
     font-size: 9px;
     font-weight: bold;
@@ -188,11 +197,6 @@
 .bottom-bar switch {
     min-height: 20px;
     min-width: 36px;
-}
-
-/* Scrolled container inside theme picker popover */
-popover.z13-popover scrolledwindow {
-    background: transparent;
 }
 
 /* Gamepad focus indicator — outline on the currently focused widget */
