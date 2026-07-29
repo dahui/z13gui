@@ -61,20 +61,49 @@ jobs:
         (github.event_name == 'workflow_dispatch' && inputs.aur && (needs.release.result == 'success' || needs.release.result == 'skipped'))
       )
     steps:
+      # Check out the tag being released, not the default branch. The release job
+      # above is explicit about this and this one was not, so a workflow_dispatch
+      # for an older tag would package that tag's binary with the PKGBUILD from
+      # main. Harmless on a tag push, where the default ref is already the tag.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Get version, sha256, and pkgrel
         id: meta
         run: |
+          # pipefail is the point of this line. The default shell is `bash -e`
+          # without it, so a pipeline's status is its *last* command: a failed
+          # download still exits 0, and `sha256sum` of the resulting empty stream
+          # returns e3b0c442… — a perfectly well-formed checksum that is wrong for
+          # every file. The AUR package would then publish and fail its integrity
+          # check for every user, with this workflow green.
+          set -euo pipefail
+
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${TAG#v}"
           URL="https://github.com/dahui/z13gui/releases/download/${TAG}/z13gui_${VERSION}_linux_amd64.tar.gz"
           SHA256=$(curl -fsSL "$URL" | sha256sum | cut -d' ' -f1)
 
-          # Compute pkgrel: increment if same version already on AUR, else 1
+          # Belt and braces, and self-documenting: name the failure rather than
+          # leaving a future reader to recognise the empty-stream hash.
+          EMPTY_SHA=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+          if [ "$SHA256" = "$EMPTY_SHA" ]; then
+            echo "::error::downloaded an empty stream from $URL — refusing to publish a bad checksum"
+            exit 1
+          fi
+          case "$SHA256" in
+            [0-9a-f][0-9a-f]*) [ "${#SHA256}" -eq 64 ] || { echo "::error::malformed sha256: $SHA256"; exit 1; } ;;
+            *) echo "::error::malformed sha256: $SHA256"; exit 1 ;;
+          esac
+
+          # Compute pkgrel: increment if same version already on AUR, else 1.
+          # This lookup is advisory — it only picks pkgrel — so unlike the download
+          # above it is deliberately tolerant of a blip in the AUR API, which must
+          # not fail a release. `|| true` keeps that behaviour now pipefail is on.
           PKGREL=1
           AUR_VER=$(curl -fsSL "https://aur.archlinux.org/rpc/v5/info?arg[]=z13gui-bin" \
-            | jq -r '.results[0].Version // empty')
+            | jq -r '.results[0].Version // empty' || true)
           if [ -n "$AUR_VER" ]; then
             AUR_PKGVER="${AUR_VER%-*}"
             AUR_PKGREL="${AUR_VER##*-}"

@@ -2,8 +2,6 @@ github.com/KarpelesLab/weak v0.1.1 h1:fNnlPo3aypS9tBzoEQluY13XyUfd/eWaSE/vMvo9s4
 github.com/KarpelesLab/weak v0.1.1/go.mod h1:pzXsWs5f2bf+fpgHayTlBE1qJpO3MpJKo5sRaLu1XNw=
 github.com/cilium/ebpf v0.21.0 h1:4dpx1J/B/1apeTmWBH5BkVLayHTkFrMovVPnHEk+l3k=
 github.com/cilium/ebpf v0.21.0/go.mod h1:1kHKv6Kvh5a6TePP5vvvoMa1bclRyzUXELSs272fmIQ=
-github.com/dahui/z13ctl/api v1.1.6 h1:yF6cTmBAsYtlFqLX2W3VaU1VVq9NDNNOV4MLcdto1Gs=
-github.com/dahui/z13ctl/api v1.1.6/go.mod h1:WaV3cyrZkszY22RbnJh05/YXMapnP3BcyiAvtyRLnj8=
 github.com/dahui/z13ctl/api v1.1.7 h1:23PpM8A1LJUsB646TFulZxOkFsB2vsRNBblXpTxhioc=
 github.com/dahui/z13ctl/api v1.1.7/go.mod h1:WaV3cyrZkszY22RbnJh05/YXMapnP3BcyiAvtyRLnj8=
 github.com/diamondburned/gotk4-layer-shell/pkg v0.0.0-20240109211357-6efa9f6dc438 h1:Ymnl4B+Fn4srLxXbRV2RY1iHT2SH3oAkOfxeEeMI3Fg=

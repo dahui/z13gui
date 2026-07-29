@@ -25,6 +25,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # goreleaser runs `go mod tidy` as a before-hook, so an untidy tree means
+      # every release build silently rewrites go.sum after goreleaser's git-dirty
+      # check has already passed — the released binary's inputs then differ from
+      # the tagged tree. Nothing else here would notice: stale go.sum entries are
+      # ignored by the build. v1.1.6 hashes survived yesterday's api bump this way.
+      - name: go.mod and go.sum are tidy
+        run: go mod tidy -diff
       - name: Unit tests
         run: make test
       - name: Unit tests (race detector)
