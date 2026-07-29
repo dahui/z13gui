@@ -665,28 +665,56 @@ func (w *Window) syncCustomView() {
 	}
 }
 
-// sendTdp sends the current TDP slider values to the daemon.
-func (w *Window) sendTdp() error {
+// tdpRequest is a snapshot of the TDP widgets, taken on the GTK thread so the
+// socket call can run in a goroutine without touching widgets from it.
+type tdpRequest struct {
+	watts, pl1, pl2, pl3 string
+	force                bool
+}
+
+// readTdpRequest snapshots the TDP sliders. **Must be called from the GTK main
+// thread** — GTK is not thread-safe, and reading a scale from a goroutine is
+// undefined behaviour, not merely a stale value.
+func (w *Window) readTdpRequest() tdpRequest {
 	if w.tdpAdvancedCheck != nil && w.tdpAdvancedCheck.Active() {
-		pl1 := fmt.Sprintf("%d", int(w.tdpPL1Scale.Value()))
-		pl2 := fmt.Sprintf("%d", int(w.tdpPL2Scale.Value()))
-		pl3 := fmt.Sprintf("%d", int(w.tdpPL3Scale.Value()))
-		maxPL := int(math.Max(w.tdpPL1Scale.Value(), math.Max(w.tdpPL2Scale.Value(), w.tdpPL3Scale.Value())))
-		force := w.limits.ForceRequired(maxPL)
-		_, err := api.SendTdpSet(pl1, pl1, pl2, pl3, force)
-		return err
+		pl1v, pl2v, pl3v := w.tdpPL1Scale.Value(), w.tdpPL2Scale.Value(), w.tdpPL3Scale.Value()
+		pl1 := fmt.Sprintf("%d", int(pl1v))
+		maxPL := int(math.Max(pl1v, math.Max(pl2v, pl3v)))
+		return tdpRequest{
+			// watts doubles as the base value; the daemon parses it before it looks
+			// at the PL fields and rejects the request outright if it is empty.
+			watts: pl1,
+			pl1:   pl1,
+			pl2:   fmt.Sprintf("%d", int(pl2v)),
+			pl3:   fmt.Sprintf("%d", int(pl3v)),
+			force: w.limits.ForceRequired(maxPL),
+		}
 	}
-	watts := fmt.Sprintf("%d", int(w.tdpBasicScale.Value()))
-	_, err := api.SendTdpSet(watts, "", "", "", false)
+	return tdpRequest{watts: fmt.Sprintf("%d", int(w.tdpBasicScale.Value()))}
+}
+
+// send performs the socket round-trip. Safe to call from a goroutine — it holds
+// only plain strings.
+func (r tdpRequest) send() error {
+	_, err := api.SendTdpSet(r.watts, r.pl1, r.pl2, r.pl3, r.force)
 	return err
 }
 
-// sendFanCurve sends the current fan curve to the daemon.
-func (w *Window) sendFanCurve() error {
+// readFanCurve snapshots the fan curve as its wire string. Must be called from
+// the GTK main thread; returns "" when there is no editor to read.
+func (w *Window) readFanCurve() string {
 	if w.fanCurve == nil {
+		return ""
+	}
+	return w.fanCurve.curveString()
+}
+
+// sendFanCurve sends a previously snapshotted curve. Safe from a goroutine.
+func sendFanCurve(curve string) error {
+	if curve == "" {
 		return nil
 	}
-	_, err := api.SendFanCurveSet(w.fanCurve.curveString())
+	_, err := api.SendFanCurveSet(curve)
 	return err
 }
 
@@ -712,8 +740,9 @@ func (w *Window) refreshState() {
 
 // saveCustomTdp commits only the TDP values.
 func (w *Window) saveCustomTdp() {
+	req := w.readTdpRequest() // widget reads stay on the GTK thread
 	go func() {
-		if err := w.sendTdp(); err != nil {
+		if err := req.send(); err != nil {
 			w.reportError("Save TDP", err)
 			return
 		}
@@ -725,8 +754,9 @@ func (w *Window) saveCustomTdp() {
 
 // saveCustomFanCurve commits only the fan curve.
 func (w *Window) saveCustomFanCurve() {
+	curve := w.readFanCurve() // widget read stays on the GTK thread
 	go func() {
-		if err := w.sendFanCurve(); err != nil {
+		if err := sendFanCurve(curve); err != nil {
 			w.reportError("Save fan curve", err)
 			return
 		}
@@ -738,9 +768,11 @@ func (w *Window) saveCustomFanCurve() {
 
 // saveCustomBoth commits both TDP and fan curve.
 func (w *Window) saveCustomBoth() {
+	req := w.readTdpRequest() // widget reads stay on the GTK thread
+	curve := w.readFanCurve()
 	go func() {
-		tdpErr := w.sendTdp()
-		fanErr := w.sendFanCurve()
+		tdpErr := req.send()
+		fanErr := sendFanCurve(curve)
 		switch {
 		case tdpErr != nil:
 			// TDP first: a rejected TDP is usually why the fan write failed too
@@ -786,8 +818,8 @@ func (w *Window) resetFanCurve() {
 
 // saveUndervolt commits the current Curve Optimizer offsets to the daemon.
 func (w *Window) saveUndervolt() {
+	cpu := fmt.Sprintf("%d", int(w.uvCpuScale.Value())) // GTK thread
 	go func() {
-		cpu := fmt.Sprintf("%d", int(w.uvCpuScale.Value()))
 		if _, err := api.SendUndervoltSet(cpu); err != nil {
 			w.reportError("Save undervolt", err)
 			return

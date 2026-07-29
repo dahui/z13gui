@@ -4,7 +4,14 @@ PREFIX   ?= /usr/local
 
 HIDBLOCKER_DIR := internal/gui/gamepad/hidblocker
 
-.PHONY: build test cover lint mod-tidy vmlinux generate snapshot release install setcap install-service uninstall-service install-desktop clean help
+# PURE_PKGS is every internal package that compiles without CGO and GTK4 headers,
+# derived rather than hand-listed so a newly added package is tested automatically.
+# `go test ./...` cannot be used because internal/gui needs both; `go list` only
+# reads the source, so it works without them. Anything under internal/gui is
+# excluded by construction — that is the boundary: widgets there, decisions here.
+PURE_PKGS := $(shell go list ./internal/... 2>/dev/null | grep -v '/internal/gui')
+
+.PHONY: build test race cover lint mod-tidy vmlinux generate snapshot release install setcap install-service uninstall-service install-desktop clean help
 
 ## build: compile z13gui (CGO required for GTK4)
 build:
@@ -12,11 +19,15 @@ build:
 
 ## test: run unit tests (pure Go; no GTK4 headers required)
 test:
-	go test ./internal/power/... ./internal/theme/... ./internal/togglegate/...
+	go test $(PURE_PKGS)
+
+## race: run unit tests under the race detector
+race:
+	go test -race $(PURE_PKGS)
 
 ## cover: run tests with coverage report
 cover:
-	go test -coverprofile=coverage.out ./internal/power/... ./internal/theme/... ./internal/togglegate/...
+	go test -coverprofile=coverage.out $(PURE_PKGS)
 	go tool cover -func=coverage.out
 
 ## lint: run golangci-lint

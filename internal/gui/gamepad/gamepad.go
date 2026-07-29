@@ -49,9 +49,9 @@ type Handler func(Action)
 type deviceClass int
 
 const (
-	deviceIgnore  deviceClass = iota // not gamepad-related; skip
-	deviceGamepad                    // full gamepad: read events + EVIOCGRAB
-	deviceGrabOnly                   // related device (e.g. PS touchpad): EVIOCGRAB only
+	deviceIgnore   deviceClass = iota // not gamepad-related; skip
+	deviceGamepad                     // full gamepad: read events + EVIOCGRAB
+	deviceGrabOnly                    // related device (e.g. PS touchpad): EVIOCGRAB only
 )
 
 // gamepadButtons are evdev button codes that identify a device as a gamepad.

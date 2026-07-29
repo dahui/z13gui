@@ -5,35 +5,14 @@ package gui
 import (
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/dahui/z13ctl/api"
+	"github.com/dahui/z13gui/internal/colorconv"
+	"github.com/dahui/z13gui/internal/lighting"
 	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
-
-// Defaults used when widget state is unavailable (e.g. before first sync).
-const (
-	defaultColor1     = "FF0000"
-	defaultColor2     = "000000"
-	defaultMode       = "static"
-	defaultSpeed      = "normal"
-	defaultBrightness = 3
-)
-
-// modeVis defines which subsections are visible for a given lighting mode.
-type modeVis struct{ color1, color2, speed, brightness bool }
-
-// modeVisMap maps lighting mode names to their subsection visibility.
-var modeVisMap = map[string]modeVis{
-	"static":  {true, false, false, true},
-	"breathe": {true, true, true, true},
-	"cycle":   {false, false, true, true},
-	"rainbow": {false, false, true, true},
-	"strobe":  {true, false, true, true},
-	"off":     {false, false, false, false},
-}
 
 // activeButton returns the key of the button with the .active CSS class,
 // or the fallback value if none is found.
@@ -49,22 +28,18 @@ func activeButton(btns map[string]*gtk.Button, fallback string) string {
 // syncModeVis shows/hides color and speed sections based on the active mode.
 // Safe to call at any time (including during sync).
 func (w *Window) syncModeVis() {
-	mode := activeButton(w.modeButtons, "static")
-	v, ok := modeVisMap[mode]
-	if !ok {
-		v = modeVis{true, true, true, true}
-	}
+	c := lighting.ControlsFor(activeButton(w.modeButtons, lighting.DefaultMode))
 	if w.color1Box != nil {
-		w.color1Box.SetVisible(v.color1)
+		w.color1Box.SetVisible(c.Color1)
 	}
 	if w.color2Box != nil {
-		w.color2Box.SetVisible(v.color2)
+		w.color2Box.SetVisible(c.Color2)
 	}
 	if w.speedBox != nil {
-		w.speedBox.SetVisible(v.speed)
+		w.speedBox.SetVisible(c.Speed)
 	}
 	if w.brightBox != nil {
-		w.brightBox.SetVisible(v.brightness)
+		w.brightBox.SetVisible(c.Brightness)
 	}
 }
 
@@ -94,27 +69,28 @@ func (w *Window) syncLightingSection() {
 	w.syncing = true
 	defer func() { w.syncing = prev }()
 
-	var ls api.LightingState
-	if w.state != nil {
-		if dev, ok := w.state.Devices[w.tab]; ok {
-			ls = dev
-		} else {
-			ls = w.state.Lighting
+	ls := lighting.StateForZone(w.state, w.tab)
+	setActiveButton(w.modeButtons, lighting.ResolveMode(ls))
+	// Normalize on ingest. Daemon state is not guaranteed well-formed — z13ctl has
+	// had corrupt-state-file bugs — and an unparseable colour used to silently
+	// become black in the picker and then be written back to the hardware on the
+	// next apply. Keep the previous value instead.
+	if w.color1 != nil {
+		if hex, ok := colorconv.Normalize(ls.Color); ok {
+			w.color1.hex = hex
+		} else if ls.Color != "" {
+			slog.Warn("daemon sent an unparseable color, keeping previous", "zone", w.tab, "field", "color", "value", ls.Color)
 		}
 	}
-	mode := ls.Mode
-	if !ls.Enabled {
-		mode = "off"
-	}
-	setActiveButton(w.modeButtons, mode)
-	if w.color1 != nil && ls.Color != "" {
-		w.color1.hex = strings.ToUpper(ls.Color)
-	}
-	if w.color2 != nil && ls.Color2 != "" {
-		w.color2.hex = strings.ToUpper(ls.Color2)
+	if w.color2 != nil {
+		if hex, ok := colorconv.Normalize(ls.Color2); ok {
+			w.color2.hex = hex
+		} else if ls.Color2 != "" {
+			slog.Warn("daemon sent an unparseable color, keeping previous", "zone", w.tab, "field", "color2", "value", ls.Color2)
+		}
 	}
 	w.updateSwatches()
-	setActiveButton(w.speedBtns, ls.Speed)
+	setActiveButton(w.speedBtns, lighting.ResolveSpeed(ls))
 	if w.brightScale != nil {
 		w.brightScale.SetValue(float64(ls.Brightness))
 	}
@@ -161,19 +137,19 @@ func (w *Window) sendApply() {
 	if w.syncing {
 		return
 	}
-	color1 := defaultColor1
+	color1 := lighting.DefaultColor1
 	if w.color1 != nil {
 		color1 = w.color1.hex
 	}
-	color2 := defaultColor2
+	color2 := lighting.DefaultColor2
 	if w.color2 != nil {
 		color2 = w.color2.hex
 	}
 
-	mode := activeButton(w.modeButtons, defaultMode)
-	speed := activeButton(w.speedBtns, defaultSpeed)
+	mode := activeButton(w.modeButtons, lighting.DefaultMode)
+	speed := activeButton(w.speedBtns, lighting.DefaultSpeed)
 
-	brightness := defaultBrightness
+	brightness := lighting.DefaultBrightness
 	if w.brightScale != nil {
 		brightness = int(w.brightScale.Value())
 	}

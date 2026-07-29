@@ -53,19 +53,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strconv"
 	"unsafe" //nolint:gocritic // used with cgo, requires separate import block
 
+	"github.com/dahui/z13gui/internal/uiscale"
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
 const (
-	referenceWidth = 1707.0      // 2560 / 1.5; matches KDE 150% at Z13 native resolution
-	minScale       = 1.0         // lower bound for UI scale
-	maxScale       = 3.0         // upper bound for UI scale
-	marginFraction = 20          // screen height / N for 5% top/bottom margins
-	fullOpacity    = 0xFFFFFFFF  // _NET_WM_WINDOW_OPACITY value for fully visible
+	marginFraction = 20         // screen height / N for 5% top/bottom margins
+	fullOpacity    = 0xFFFFFFFF // _NET_WM_WINDOW_OPACITY value for fully visible
 )
 
 // Backend manages the gamescope X11 overlay window.
@@ -116,7 +113,7 @@ func (b *Backend) Configure(_ func() bool, onDismiss func()) {
 			return
 		}
 		b.xdisplay = C.display_get_xdisplay(unsafe.Pointer(display.Native())) //nolint:govet // GObject pointer is C-heap-allocated and pinned; uintptr→unsafe.Pointer is safe
-		b.xid = C.surface_get_xid(unsafe.Pointer(surface.Native()))         //nolint:govet // GObject pointer is C-heap-allocated and pinned; uintptr→unsafe.Pointer is safe
+		b.xid = C.surface_get_xid(unsafe.Pointer(surface.Native()))           //nolint:govet // GObject pointer is C-heap-allocated and pinned; uintptr→unsafe.Pointer is safe
 		b.ready = true
 
 		// Store output dimensions for WrapContent (which runs after realize).
@@ -127,18 +124,13 @@ func (b *Backend) Configure(_ func() bool, onDismiss func()) {
 			geo := monitor.Geometry()
 			b.outputWidth = geo.Width()
 			b.outputHeight = geo.Height()
-			if envScale := os.Getenv("Z13GUI_SCALE"); envScale != "" {
-				if v, err := strconv.ParseFloat(envScale, 64); err == nil && v > 0 {
-					b.scale = v
-				}
-			} else {
-				b.scale = float64(geo.Width()) / referenceWidth
-			}
-			if b.scale < minScale {
-				b.scale = minScale
-			}
-			if b.scale > maxScale {
-				b.scale = maxScale
+			envScale := os.Getenv("Z13GUI_SCALE")
+			b.scale = uiscale.For(geo.Width(), envScale)
+			if envScale != "" && !uiscale.OverrideIsUsable(envScale) {
+				slog.Warn("gamescope: Z13GUI_SCALE is not a positive number, auto-detecting", "value", envScale)
+			} else if uiscale.OverrideWasClamped(envScale) {
+				slog.Warn("gamescope: Z13GUI_SCALE clamped to the usable range",
+					"requested", envScale, "applied", b.scale, "min", uiscale.Min, "max", uiscale.Max)
 			}
 			b.appWin.SetDefaultSize(geo.Width(), geo.Height())
 			slog.Info("gamescope: sized to monitor", "w", geo.Width(), "h", geo.Height(), "scale", b.scale)
@@ -299,33 +291,33 @@ func (b *Backend) scaledCSS() string {
 .custom-actions button { min-height: %.0fpx; padding: %.0fpx %.0fpx; border-radius: %.0fpx; }
 .advanced-check { min-height: %.0fpx; padding: %.0fpx %.0fpx; border-radius: %.0fpx; }`,
 		s,
-		14*s,                     // .drawer font-size
-		48*s, 4*s, 10*s, 6*s,    // btn-group button
-		48*s, 4*s, 10*s, 6*s,    // checkbutton
-		52*s,                     // mode-grid btn-group button
-		48*s,                     // tab-btn
-		24*s, 24*s,               // scale slider
-		6*s,                      // scale value margin
-		11*s, 3*s,                // drawer-title
-		10*s, 0.5*s,              // header-telemetry (font-size, letter-spacing)
-		13*s, 2*s, 2*s,           // section-group
-		11*s, 1*s, 6*s, 2*s,     // section-label
-		10*s, 2*s, 2*s,           // scale-value
-		10*s, 4*s,                // scale-name
-		28*s, 28*s, 4*s,          // color-swatch
-		28*s, 28*s, 4*s,          // color-preset
-		32*s, 32*s, 4*s, 6*s,    // bottom-bar button
-		9*s, 1*s,                 // accent-label
-		2*s,                      // accent-dot-active border
-		10*s, 0.5*s,              // toggle-label
-		20*s, 36*s, 10*s,         // bottom-bar switch (height, width, border-radius)
-		16*s, 16*s, 8*s,          // switch slider (width, height, border-radius)
-		32*s, 32*s, 4*s,          // view-back-btn
-		2*s, 2*s,                 // gamepad-focus (outline-width, outline-offset)
-		2*s, 2*s,                 // gamepad-editing (outline-width, outline-offset)
-		10*s, 4*s, 4*s,           // tdp-warning (font-size, margin-top, margin-bottom)
-		240*s, 6*s,               // fan-curve-area (min-height, border-radius)
-		36*s, 4*s, 8*s, 6*s,     // custom-actions button (min-height, padding-v, padding-h, border-radius)
-		36*s, 4*s, 10*s, 6*s,    // advanced-check (min-height, padding-v, padding-h, border-radius)
+		14*s,                 // .drawer font-size
+		48*s, 4*s, 10*s, 6*s, // btn-group button
+		48*s, 4*s, 10*s, 6*s, // checkbutton
+		52*s,       // mode-grid btn-group button
+		48*s,       // tab-btn
+		24*s, 24*s, // scale slider
+		6*s,       // scale value margin
+		11*s, 3*s, // drawer-title
+		10*s, 0.5*s, // header-telemetry (font-size, letter-spacing)
+		13*s, 2*s, 2*s, // section-group
+		11*s, 1*s, 6*s, 2*s, // section-label
+		10*s, 2*s, 2*s, // scale-value
+		10*s, 4*s, // scale-name
+		28*s, 28*s, 4*s, // color-swatch
+		28*s, 28*s, 4*s, // color-preset
+		32*s, 32*s, 4*s, 6*s, // bottom-bar button
+		9*s, 1*s, // accent-label
+		2*s,         // accent-dot-active border
+		10*s, 0.5*s, // toggle-label
+		20*s, 36*s, 10*s, // bottom-bar switch (height, width, border-radius)
+		16*s, 16*s, 8*s, // switch slider (width, height, border-radius)
+		32*s, 32*s, 4*s, // view-back-btn
+		2*s, 2*s, // gamepad-focus (outline-width, outline-offset)
+		2*s, 2*s, // gamepad-editing (outline-width, outline-offset)
+		10*s, 4*s, 4*s, // tdp-warning (font-size, margin-top, margin-bottom)
+		240*s, 6*s, // fan-curve-area (min-height, border-radius)
+		36*s, 4*s, 8*s, 6*s, // custom-actions button (min-height, padding-v, padding-h, border-radius)
+		36*s, 4*s, 10*s, 6*s, // advanced-check (min-height, padding-v, padding-h, border-radius)
 	)
 }

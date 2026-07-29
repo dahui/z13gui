@@ -35,10 +35,9 @@ internal/gui/
   controls.go                   All GTK widget construction (drawer, views, bottom bar)
   tdp.go                        Custom profile view: TDP sliders, fan curve editor, undervolt, telemetry
   sync.go                       Daemon state sync and API send functions
-  color.go                      colorInput struct, HSL conversion, color picker view logic
+  color.go                      colorInput widget + color picker view (math in internal/colorconv)
   errbar.go                     Error bar: reportError/clearError, the only user-facing error surface
-  focus.go                      2D grid gamepad focus navigation + modal slider editing
-  log.go                        Split-level slog handler (app vs GTK noise filtering)
+  focus.go                      Focus widget adaptor (navigation logic in internal/focusgrid)
   layout.css                    Embedded structural CSS (touch targets, sizing) — PRIORITY_APPLICATION
   theme-default.css             Embedded theme template with @define-color placeholders — PRIORITY_USER
   theme-default.toml            Embedded default theme colors (rog-dark), used by --print-theme
@@ -67,12 +66,13 @@ internal/theme/
   css.go                        @define-color generation from a Colors value
   config.go                     Config persistence (selected theme/accent)
   *_test.go                     Theme parsing, CSS generation, and built-in completeness tests
-internal/power/
-  power.go                      Limits value: TDP/fan bounds + rules (pure; mirrors z13ctl internal/cli)
-  power_test.go                 Unit tests incl. a fictional 2nd device — 100% coverage
-internal/togglegate/
-  togglegate.go                 Pure debounce helper for duplicate gui-toggle bursts
-  togglegate_test.go            Unit tests (pure Go, no GTK4)
+internal/power/                 Limits value: TDP/fan bounds + rules (mirrors z13ctl internal/cli)
+internal/focusgrid/             Gamepad focus navigation: row/col/section index math
+internal/colorconv/             hex <-> HSL conversion and colour validation
+internal/lighting/              RGB mode resolution, per-mode controls, defaults
+internal/uiscale/               Gamescope UI scale factor (cannot live in the cgo package)
+internal/startup/               CLI arg scanning + split-level slog handler
+internal/togglegate/            Debounce helper for duplicate gui-toggle bursts
 contrib/
   z13gui.service                systemd user service (EnvironmentFile for gamescope-session)
   z13gui.desktop                Desktop entry
@@ -130,10 +130,21 @@ contrib/
   (`commandTimeout`, api v1.1.7), so an inline call freezes the drawer for up to 10s
   against a wedged daemon. Read widget values on the main thread, then do the socket
   round-trip in a goroutine — see `sendApply()` in `sync.go` for the pattern.
-- **Pure rules live in `internal/power`, not in the widget code.** `internal/gui`
-  needs CGO + GTK4 headers so it cannot be unit tested; anything that is a *decision*
-  rather than a *widget* belongs in `power` where it is covered by tests. Add new
-  rules there, with tests, rather than inline in `tdp.go`.
+- **Decisions live outside `internal/gui`; widgets live inside it.** `internal/gui`
+  needs CGO + GTK4 headers, so `make test` cannot even compile it — anything left in
+  there is permanently unverifiable. Every rule, calculation or classification
+  belongs in a pure package (`power`, `focusgrid`, `colorconv`, `lighting`,
+  `uiscale`, `startup`, `togglegate`); the GTK files are thin adaptors that read
+  widgets, call out, and apply the answer. Extracting logic this way has caught
+  seven real bugs so far, none of which were found by reading the code.
+  - `make test` derives its package list with
+    `go list ./internal/... | grep -v /internal/gui`, so a new pure package is
+    picked up automatically — nothing to remember.
+  - **Never read or write a GTK widget from a goroutine.** GTK is not thread-safe;
+    this is undefined behaviour, not a stale read. Snapshot widget values on the
+    main thread into plain data, then do the socket call in the goroutine — see
+    `readTdpRequest`/`tdpRequest.send` in `tdp.go` and `sendApply` in `sync.go`.
+    Come back to the main thread with `glib.IdleAdd`.
 - **Device limits are a value, not constants.** `power.Limits` holds the TDP range,
   fan floor, temperature axis and stock PPT table; `Window.limits` is initialised to
   `power.DefaultLimits()` (the Z13's values). **No TDP or fan bound may be hardcoded
@@ -324,15 +335,16 @@ make release    # goreleaser build + publish
 
 Requires at build time: `gtk4-layer-shell` C library (`pkg-config gtk4-layer-shell-0`).
 
-`make test` enumerates the pure-Go packages explicitly (`internal/power`,
-`internal/theme`, `internal/togglegate`) rather than using `./...`, because
-`internal/gui` needs CGO and GTK4 headers. **Add new pure-Go packages to the `test` and
-`cover` targets** — otherwise their tests never run; there is no CI test job (the only
-workflow is release).
+`make test` derives its package list from `go list ./internal/...` minus
+`internal/gui`, because `internal/gui` needs CGO and GTK4 headers while `go list`
+only reads source. A new pure package is therefore tested automatically. `make race`
+runs the same set under the race detector; `make cover` reports per-function
+coverage.
 
-Because `internal/gui` is untestable, prefer extracting logic into a pure package over
-leaving it inline — see `internal/power`. That extraction immediately caught a live bug
-in the fan curve constraint cascade that had shipped unnoticed.
+CI (`.github/workflows/ci.yml`) runs tests + race on plain ubuntu and
+build + gofmt + lint in the same Arch container as the release job. Before this
+existed nothing ran tests on a push, which is how PR #10 merged tests that never
+executed.
 
 ## Known GTK issues (do not re-introduce)
 

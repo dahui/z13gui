@@ -70,17 +70,22 @@ go work init . ../z13ctl/api
 make build     # compile (requires GTK4 headers)
 make lint      # run golangci-lint
 make test      # run unit tests (pure Go, no GTK4 required)
+make race      # the same tests under the race detector
 ```
 
-Tests live in the pure-Go packages (`internal/power`, `internal/theme`,
-`internal/togglegate`) — no
+Tests live in the pure-Go packages — everything under `internal/` except
+`internal/gui` — with no
 hardware or GTK4 dependency. GUI packages are integration-tested manually against
 hardware.
 
-`make test` lists those packages explicitly instead of using `./...`, since
-`internal/gui` requires CGO and GTK4 headers. If you add a new pure-Go package with
-tests, add it to the `test` and `cover` targets in the Makefile or its tests will
-never run.
+`make test` derives that list with `go list ./internal/... | grep -v /internal/gui`
+rather than using `./...`, since `internal/gui` requires CGO and GTK4 headers. A new
+pure package is picked up automatically — there is nothing to register.
+
+Because `internal/gui` cannot be compiled by the test tool at all, prefer putting
+logic in a pure package and leaving only widget wiring behind. That is not a style
+preference: it is the difference between code that can be verified and code that
+cannot.
 
 Pull requests must pass `make build`, `make lint`, and `make test` without errors,
 and should include tests for any changes to the pure-Go packages.
@@ -91,7 +96,12 @@ and should include tests for any changes to the pure-Go packages.
 
 - `internal/theme` — fully unit-testable; covers color parsing, CSS generation,
   config persistence, and all 78 built-in theme/accent combinations
-- `internal/power` — TDP limits and fan curve rules; 100% covered
+- `internal/power` — TDP limits and fan curve rules
+- `internal/focusgrid` — gamepad focus navigation index math
+- `internal/colorconv` — hex/HSL conversion and colour validation
+- `internal/lighting` — RGB mode resolution and per-mode controls
+- `internal/uiscale` — gamescope UI scale factor
+- `internal/startup` — CLI argument scanning and log filtering
 - `internal/togglegate` — pure debounce helper for duplicate `gui-toggle` bursts
 - `internal/gui` — requires GTK4; integration-tested manually against hardware
 - Display backends (layershell, gamescope) — require a compositor or gamescope;
