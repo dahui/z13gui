@@ -11,7 +11,7 @@ HIDBLOCKER_DIR := internal/gui/gamepad/hidblocker
 # excluded by construction — that is the boundary: widgets there, decisions here.
 PURE_PKGS := $(shell go list ./internal/... 2>/dev/null | grep -v '/internal/gui')
 
-.PHONY: build test race cover lint mod-tidy vmlinux generate snapshot release install setcap install-service uninstall-service install-desktop clean help
+.PHONY: build test race cover lint fmt-check mod-tidy vmlinux generate snapshot release install setcap install-service uninstall-service install-desktop clean help
 
 ## build: compile z13gui (CGO required for GTK4)
 build:
@@ -30,9 +30,26 @@ cover:
 	go test -coverprofile=coverage.out $(PURE_PKGS)
 	go tool cover -func=coverage.out
 
-## lint: run golangci-lint
-lint:
+## lint: check formatting, then run golangci-lint
+lint: fmt-check
 	golangci-lint run ./...
+
+## fmt-check: fail if any file needs gofmt
+#
+# gofmt is not among golangci-lint's enabled linters, so `make lint` alone cannot
+# see formatting — which made a gofmt slip discoverable only after a push, from
+# CI. The CI job calls this target rather than carrying its own copy of the
+# command, so local and CI agree by construction instead of by remembering to
+# update both. The generated bpf2go bindings are excluded: they are committed as
+# the tool emits them.
+fmt-check:
+	@unformatted="$$(gofmt -l . | grep -v '^$(HIDBLOCKER_DIR)/blocker_' || true)"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "These files need gofmt:"; \
+		echo "$$unformatted"; \
+		echo "Run: gofmt -w <file>"; \
+		exit 1; \
+	fi
 
 ## mod-tidy: tidy go.mod
 mod-tidy:

@@ -57,14 +57,11 @@ jobs:
           go-version-file: go.mod
       - name: Build
         run: make build
+      # Same target `make lint` depends on, so a formatting slip fails locally
+      # before it can fail here. Previously this step carried its own copy of the
+      # command and nothing in the Makefile checked formatting at all.
       - name: gofmt
-        run: |
-          unformatted="$(gofmt -l . | grep -v '^internal/gui/gamepad/hidblocker/blocker_' || true)"
-          if [ -n "$unformatted" ]; then
-            echo "These files need gofmt:"
-            echo "$unformatted"
-            exit 1
-          fi
+        run: make fmt-check
       - uses: golangci/golangci-lint-action@v6
         with:
           version: latest

@@ -111,9 +111,9 @@ func RGB(hex string) (r, g, b float64, ok bool) {
 	if err != nil {
 		return 0, 0, 0, false
 	}
-	return float64((v >> 16) & 0xFF) / 255,
-		float64((v >> 8) & 0xFF) / 255,
-		float64(v & 0xFF) / 255,
+	return float64((v>>16)&0xFF) / 255,
+		float64((v>>8)&0xFF) / 255,
+		float64(v&0xFF) / 255,
 		true
 }
 
