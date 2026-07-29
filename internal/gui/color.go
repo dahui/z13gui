@@ -122,11 +122,15 @@ func (w *Window) showColorView(ci *colorInput) {
 	// here means something skipped that path. Leaving the sliders alone beats
 	// snapping them to black.
 	if h, sat, l, ok := colorconv.HexToHSL(ci.hex); ok {
+		// Save and restore rather than assign false: everywhere else that suppresses
+		// signals does the same, and a bare assignment here would clear the flag out
+		// from under an enclosing sync if this were ever reached from one.
+		prev := w.syncing
 		w.syncing = true
 		w.colorHue.SetValue(h)
 		w.colorSat.SetValue(sat)
 		w.colorLit.SetValue(l)
-		w.syncing = false
+		w.syncing = prev
 	} else {
 		slog.Warn("color picker opened with an unparseable color", "hex", ci.hex)
 	}
@@ -162,11 +166,12 @@ func (w *Window) colorPickerPresetClicked(hex string) {
 	// Update HSL sliders to reflect the preset. presetColors are compile-time
 	// constants, so a failure here is a programming error, not bad input.
 	if h, s, l, ok := colorconv.HexToHSL(hex); ok {
+		prev := w.syncing
 		w.syncing = true
 		w.colorHue.SetValue(h)
 		w.colorSat.SetValue(s)
 		w.colorLit.SetValue(l)
-		w.syncing = false
+		w.syncing = prev
 	} else {
 		slog.Error("preset color is not parseable", "hex", hex)
 	}

@@ -185,3 +185,79 @@ func TestStateForZonePrefersADisabledDeviceEntry(t *testing.T) {
 		t.Errorf("disabled lightbar resolved to %q, want off", got)
 	}
 }
+
+func TestResolveBrightness(t *testing.T) {
+	tests := []struct {
+		name string
+		ls   api.LightingState
+		want int
+	}{
+		{
+			// The exact state z13ctl's per-zone off writes: LightingState{Enabled:
+			// false}, every other field zeroed. Adopting the 0 sent brightness 0 on
+			// the next apply, which is the hardware's off level — so re-enabling a
+			// zone left the keyboard dark while reporting success.
+			name: "disabled with everything zeroed",
+			ls:   api.LightingState{Enabled: false},
+			want: DefaultBrightness,
+		},
+		{
+			// Full off preserves the rest of the global entry, so the stored value is
+			// real — but it still must not be adopted while disabled, or the same
+			// trap applies whenever that value happens to be 0.
+			name: "disabled with a stored brightness",
+			ls:   api.LightingState{Enabled: false, Mode: "breathe", Brightness: 0},
+			want: DefaultBrightness,
+		},
+		{
+			name: "disabled with a non-zero stored brightness",
+			ls:   api.LightingState{Enabled: false, Brightness: 2},
+			want: DefaultBrightness,
+		},
+		{
+			name: "enabled passes its value through",
+			ls:   api.LightingState{Enabled: true, Brightness: 2},
+			want: 2,
+		},
+		{
+			name: "enabled at maximum",
+			ls:   api.LightingState{Enabled: true, Brightness: 3},
+			want: 3,
+		},
+		{
+			// A deliberate slider choice on an enabled zone. Substituting here would
+			// misreport the hardware, which is the opposite failure.
+			name: "enabled at zero is the user's choice",
+			ls:   api.LightingState{Enabled: true, Brightness: 0},
+			want: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ResolveBrightness(tt.ls); got != tt.want {
+				t.Errorf("ResolveBrightness(%+v) = %d, want %d", tt.ls, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestResolveBrightnessNeverDarkensAnOffZone is the property that matters: for any
+// state the drawer shows as off, the slider must offer a level that actually lights
+// the keyboard when the user picks a mode.
+func TestResolveBrightnessNeverDarkensAnOffZone(t *testing.T) {
+	for stored := -1; stored <= 4; stored++ {
+		ls := api.LightingState{Enabled: false, Brightness: stored}
+		if got := ResolveBrightness(ls); got <= 0 {
+			t.Errorf("stored %d: ResolveBrightness = %d, which leaves the zone dark "+
+				"when re-enabled", stored, got)
+		}
+	}
+}
+
+// The zero LightingState is what StateForZone returns when the daemon has told us
+// nothing, so it goes down the same path.
+func TestResolveBrightnessOfZeroValue(t *testing.T) {
+	if got := ResolveBrightness(api.LightingState{}); got != DefaultBrightness {
+		t.Errorf("ResolveBrightness(zero) = %d, want %d", got, DefaultBrightness)
+	}
+}

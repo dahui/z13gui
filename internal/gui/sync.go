@@ -93,7 +93,7 @@ func (w *Window) syncLightingSection() {
 	w.updateSwatches()
 	setActiveButton(w.speedBtns, lighting.ResolveSpeed(ls))
 	if w.brightScale != nil {
-		w.brightScale.SetValue(float64(ls.Brightness))
+		w.brightScale.SetValue(float64(lighting.ResolveBrightness(ls)))
 	}
 	w.syncModeVis()
 }

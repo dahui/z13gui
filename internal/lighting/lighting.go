@@ -18,8 +18,15 @@ const (
 	DefaultBrightness = 3
 
 	// ModeOff is the drawer's pseudo-mode for "lighting disabled". The daemon
-	// represents this as Enabled=false with the previous mode still recorded, so
-	// that re-enabling restores it; the drawer needs a selectable button for it.
+	// represents this as Enabled=false, and the drawer needs a selectable button
+	// for it.
+	//
+	// Note the daemon does not preserve the rest of the entry on a per-zone off,
+	// which is the only kind the drawer issues: it stores
+	// LightingState{Enabled: false} with mode, colours, speed and brightness all
+	// zeroed. So re-enabling cannot restore the previous effect, and every field
+	// read out of a disabled state needs a fallback — see ResolveBrightness for
+	// what happens when one does not have it.
 	ModeOff = "off"
 )
 
@@ -63,9 +70,8 @@ func KnownMode(mode string) bool {
 // ResolveMode returns the mode button the drawer should select for a lighting
 // state.
 //
-// Disabled lighting selects ModeOff regardless of the mode the daemon still has
-// recorded — the daemon keeps it so that re-enabling restores the previous effect,
-// but showing "breathe" as active while the keyboard is dark would be a lie.
+// Disabled lighting selects ModeOff regardless of any mode the daemon still has
+// recorded: showing "breathe" as active while the keyboard is dark would be a lie.
 //
 // An enabled state with no mode falls back to the default rather than selecting
 // nothing: the daemon can legitimately store a partial per-zone entry, which is
@@ -86,6 +92,29 @@ func ResolveSpeed(ls api.LightingState) string {
 		return DefaultSpeed
 	}
 	return ls.Speed
+}
+
+// ResolveBrightness returns the brightness the slider should show.
+//
+// A disabled state carries no meaningful brightness, so it reports the default
+// rather than the stored value. The daemon's per-zone off replaces the whole entry
+// with LightingState{Enabled: false} — every other field zeroed — so the stored
+// value is 0, and 0 is the hardware's "off" level, not merely a dim one.
+//
+// Without this, turning a zone off and then back on left the keyboard dark: the
+// slider adopted the zero, the next apply sent brightness 0, and the daemon
+// dutifully set the backlight to off while reporting success. The mode button lit
+// up and nothing else happened.
+//
+// A zero brightness on an *enabled* state is passed through, since that is a
+// setting the user can deliberately choose with the slider, and second-guessing it
+// would misreport the hardware. This is the same partial-state problem ResolveMode
+// and ResolveSpeed already guard against; brightness was simply missed.
+func ResolveBrightness(ls api.LightingState) int {
+	if !ls.Enabled {
+		return DefaultBrightness
+	}
+	return ls.Brightness
 }
 
 // StateForZone picks the lighting state to display for a zone, preferring the
