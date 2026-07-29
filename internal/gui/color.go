@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 package gui
 
 // color.go — color input widget: swatch + preset buttons + custom button.
@@ -6,9 +9,10 @@ package gui
 
 import (
 	"fmt"
-	"math"
-	"strings"
+	"log/slog"
 
+	"github.com/dahui/z13gui/internal/colorconv"
+	"github.com/dahui/z13gui/internal/lighting"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
@@ -38,7 +42,12 @@ type colorInput struct {
 // newColorInput creates a color input widget with swatch, preset buttons,
 // and a Custom button that navigates to the HSL color picker view.
 func (w *Window) newColorInput(initialHex, swatchName, label string) *colorInput {
-	ci := &colorInput{hex: strings.ToUpper(initialHex), label: label}
+	hex, ok := colorconv.Normalize(initialHex)
+	if !ok {
+		slog.Warn("color input created with an unparseable default", "hex", initialHex)
+		hex = lighting.DefaultColor1
+	}
+	ci := &colorInput{hex: hex, label: label}
 
 	// Current-color swatch (non-interactive colored square).
 	ci.swatch = gtk.NewBox(gtk.OrientationHorizontal, 0)
@@ -112,12 +121,22 @@ func (w *Window) showColorView(ci *colorInput) {
 	}
 	w.editingColor = ci
 	w.colorViewTitle.SetLabel(ci.label)
-	h, s, l := hexToHSL(ci.hex)
-	w.syncing = true
-	w.colorHue.SetValue(h)
-	w.colorSat.SetValue(s)
-	w.colorLit.SetValue(l)
-	w.syncing = false
+	// Defensive: hex is normalized on ingest in syncLightingSection, so a failure
+	// here means something skipped that path. Leaving the sliders alone beats
+	// snapping them to black.
+	if h, sat, l, ok := colorconv.HexToHSL(ci.hex); ok {
+		// Save and restore rather than assign false: everywhere else that suppresses
+		// signals does the same, and a bare assignment here would clear the flag out
+		// from under an enclosing sync if this were ever reached from one.
+		prev := w.syncing
+		w.syncing = true
+		w.colorHue.SetValue(h)
+		w.colorSat.SetValue(sat)
+		w.colorLit.SetValue(l)
+		w.syncing = prev
+	} else {
+		slog.Warn("color picker opened with an unparseable color", "hex", ci.hex)
+	}
 	w.updateColorPreview()
 	w.viewStack.SetVisibleChildName("color")
 	w.swapFocusList(w.colorFocusItems)
@@ -132,7 +151,7 @@ func (w *Window) onHSLChanged() {
 	h := w.colorHue.Value()
 	s := w.colorSat.Value()
 	l := w.colorLit.Value()
-	hex := hslToHex(h, s, l)
+	hex := colorconv.HSLToHex(h, s, l)
 	w.editingColor.hex = hex
 	w.updateSwatches()
 	w.updateColorPreview()
@@ -147,13 +166,18 @@ func (w *Window) colorPickerPresetClicked(hex string) {
 	w.editingColor.hex = hex
 	w.updateSwatches()
 	w.sendApply()
-	// Update HSL sliders to reflect the preset.
-	h, s, l := hexToHSL(hex)
-	w.syncing = true
-	w.colorHue.SetValue(h)
-	w.colorSat.SetValue(s)
-	w.colorLit.SetValue(l)
-	w.syncing = false
+	// Update HSL sliders to reflect the preset. presetColors are compile-time
+	// constants, so a failure here is a programming error, not bad input.
+	if h, s, l, ok := colorconv.HexToHSL(hex); ok {
+		prev := w.syncing
+		w.syncing = true
+		w.colorHue.SetValue(h)
+		w.colorSat.SetValue(s)
+		w.colorLit.SetValue(l)
+		w.syncing = prev
+	} else {
+		slog.Error("preset color is not parseable", "hex", hex)
+	}
 	w.updateColorPreview()
 }
 
@@ -168,84 +192,5 @@ func (w *Window) updateColorPreview() {
 	))
 	if w.colorHexLabel != nil {
 		w.colorHexLabel.SetLabel("#" + hex)
-	}
-}
-
-// hexToHSL converts a 6-digit hex string (e.g. "FF6600") to HSL components.
-// Returns H in [0,360], S in [0,100], L in [0,100].
-func hexToHSL(hex string) (h, s, l float64) {
-	var ri, gi, bi uint8
-	_, _ = fmt.Sscanf(hex, "%02X%02X%02X", &ri, &gi, &bi)
-	r, g, b := float64(ri)/255, float64(gi)/255, float64(bi)/255
-
-	maxC := math.Max(r, math.Max(g, b))
-	minC := math.Min(r, math.Min(g, b))
-	l = (maxC + minC) / 2
-
-	if maxC == minC {
-		return 0, 0, l * 100
-	}
-	d := maxC - minC
-	if l > 0.5 {
-		s = d / (2 - maxC - minC)
-	} else {
-		s = d / (maxC + minC)
-	}
-	switch maxC {
-	case r:
-		h = (g - b) / d
-		if g < b {
-			h += 6
-		}
-	case g:
-		h = (b-r)/d + 2
-	case b:
-		h = (r-g)/d + 4
-	}
-	return h * 60, s * 100, l * 100
-}
-
-// hslToHex converts HSL components to a 6-digit hex string.
-// H in [0,360], S in [0,100], L in [0,100].
-func hslToHex(h, s, l float64) string {
-	h, s, l = h/360, s/100, l/100
-	if s == 0 {
-		v := int(math.Round(l * 255))
-		return fmt.Sprintf("%02X%02X%02X", v, v, v)
-	}
-	var q float64
-	if l < 0.5 {
-		q = l * (1 + s)
-	} else {
-		q = l + s - l*s
-	}
-	p := 2*l - q
-	r := hueToRGB(p, q, h+1.0/3.0)
-	g := hueToRGB(p, q, h)
-	b := hueToRGB(p, q, h-1.0/3.0)
-	return fmt.Sprintf("%02X%02X%02X",
-		int(math.Round(r*255)),
-		int(math.Round(g*255)),
-		int(math.Round(b*255)),
-	)
-}
-
-// hueToRGB is a helper for HSL→RGB conversion.
-func hueToRGB(p, q, t float64) float64 {
-	if t < 0 {
-		t++
-	}
-	if t > 1 {
-		t--
-	}
-	switch {
-	case t < 1.0/6.0:
-		return p + (q-p)*6*t
-	case t < 1.0/2.0:
-		return q
-	case t < 2.0/3.0:
-		return p + (q-p)*(2.0/3.0-t)*6
-	default:
-		return p
 	}
 }

@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package layershell implements the Wayland layer-shell display backend.
 // It handles layer-shell initialization, margin-based slide animation,
 // and focus-loss auto-hide for compositors like KDE Plasma, Hyprland, and Sway.
@@ -172,6 +175,10 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 func (b *Backend) WrapContent(drawer gtk.Widgetter) gtk.Widgetter {
 	return drawer
 }
+
+// Scale is always 1.0: GTK applies the compositor's scale factor itself on
+// Wayland, so the drawer's CSS pixel values are already correct.
+func (b *Backend) Scale() float64 { return 1.0 }
 
 // Show starts the slide-in animation using a smoothstep easing curve.
 func (b *Backend) Show() {

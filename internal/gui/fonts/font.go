@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package fonts embeds the Inter typeface and registers it with fontconfig
 // at application startup so the drawer renders identically across desktop
 // (KDE/Wayland) and gamescope (Steam Gaming Mode) environments.

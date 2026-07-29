@@ -1,0 +1,390 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
+// Package power holds the TDP and fan-curve rules the drawer needs in order to
+// avoid offering the user a state the z13ctl daemon would refuse.
+//
+// It exists to be testable. The GTK code in internal/gui cannot be unit tested
+// without CGO and GTK4 headers, so everything here is pure Go operating on plain
+// values — no widgets, no daemon calls. internal/gui holds the widgets and
+// delegates every decision to this package.
+//
+// # Device limits
+//
+// The numbers live in a Limits value rather than in package constants, because
+// z13ctl is being extended to other AMD devices whose chips have different power
+// limits and per-profile PPT defaults. DefaultLimits returns the 2025 Flow Z13's
+// values, which are correct for the only device supported today.
+//
+// The daemon does not yet serve its limits over the API — they live in z13ctl's
+// internal/cli, which is not exported through the api module, so they have to be
+// duplicated here for now. When that API lands the only change is where the
+// Limits value comes from: fetch once at startup, Sanitized, falling back to
+// DefaultLimits. Nothing else in the drawer moves. See the design brief in
+// z13ctl's .claude/plans/device-limits-api.md.
+//
+// If the two ever disagree the daemon wins: it validates against hardware, and
+// these rules only exist so the UI does not present an option that gets rejected.
+package power
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/dahui/z13ctl/api"
+)
+
+// ProfileCustom is the daemon's virtual profile name for user-defined TDP, fan
+// curve and undervolt settings. The stock profiles are firmware-managed.
+const ProfileCustom = "custom"
+
+// PWM bounds. Unlike the TDP limits these are the hwmon interface's own range,
+// not a device characteristic.
+const (
+	PWMMin = 0
+	PWMMax = 255
+)
+
+// Fan pwm_enable modes as reported by sysfs and passed through by the daemon's
+// get-state. Note these are the raw hwmon values, not the 0=auto/1=custom
+// shorthand the api.FanCurveState doc comment suggests.
+const (
+	FanModeFullSpeed = 0
+	FanModeCustom    = 1
+	FanModeAuto      = 2
+)
+
+// CurvePoints is the number of points in a fan curve. It is fixed at 8 because
+// Curve is a fixed-size array; if a future device needs a different count this
+// becomes a Limits field and Curve becomes a slice, losing the compile-time
+// length guarantee. Worth deciding deliberately rather than by accident.
+const CurvePoints = 8
+
+// Limits describes one device's power and thermal envelope — everything the
+// drawer needs that varies with the hardware.
+//
+// Presentation policy is deliberately not in here. BasicSliderMax is a method
+// rather than a field because "cap the simple slider a little under the safe max"
+// is the drawer's choice; only the safe max itself is a device fact.
+type Limits struct {
+	Model         string // e.g. "GZ302EA"; for logs and bug reports
+	TDPMin        int    // absolute minimum sustained limit
+	TDPMaxSafe    int    // above this the daemon requires the force flag
+	TDPMaxForced  int    // absolute hardware maximum
+	HighTDPMinPWM int    // fan floor while sustained TDP exceeds TDPMaxSafe; 0 = none
+	TempMin       int    // fan curve temperature axis, Celsius
+	TempMax       int
+
+	// StockProfilePPT holds each stock profile's firmware PPT defaults, used to
+	// tell "the firmware's numbers" from "numbers the user chose". Only the three
+	// limits the drawer displays are listed; the daemon also tracks APU/Platform
+	// sPPT, which it mirrors from PL2 and which no UI shows.
+	StockProfilePPT map[string]api.TDPState
+}
+
+// DefaultLimits returns the 2025 ROG Flow Z13 (GZ302) values. These mirror
+// z13ctl's cli.TDPMin / TDPMaxSafe / TDPMaxForced / HighTDPMinPWM and
+// cli.StockProfilePPT.
+func DefaultLimits() Limits {
+	return Limits{
+		Model:         "GZ302",
+		TDPMin:        5,
+		TDPMaxSafe:    75,
+		TDPMaxForced:  93,
+		HighTDPMinPWM: 204, // 80% of PWMMax
+		TempMin:       35,
+		TempMax:       105,
+		StockProfilePPT: map[string]api.TDPState{
+			"quiet":       {PL1SPL: 40, PL2SPPT: 55, FPPT: 55},
+			"balanced":    {PL1SPL: 52, PL2SPPT: 71, FPPT: 70},
+			"performance": {PL1SPL: 70, PL2SPPT: 86, FPPT: 86},
+		},
+	}
+}
+
+// Sanitized returns l with any unset field replaced by its default.
+//
+// This is the guard for the day the daemon serves limits over the API: a client
+// newer than the daemon receives zero for fields the daemon does not know about,
+// and a zero TDPMaxSafe would make every fan curve fail the floor check and every
+// TDP request demand the force flag. Falling back per-field degrades gracefully
+// instead of catastrophically.
+//
+// HighTDPMinPWM is deliberately not defaulted — zero is a legitimate value there,
+// meaning a device with no fan floor at all.
+func (l Limits) Sanitized() Limits {
+	d := DefaultLimits()
+	if l.Model == "" {
+		l.Model = d.Model
+	}
+	if l.TDPMin <= 0 {
+		l.TDPMin = d.TDPMin
+	}
+	if l.TDPMaxSafe <= 0 {
+		l.TDPMaxSafe = d.TDPMaxSafe
+	}
+	if l.TDPMaxForced <= 0 {
+		l.TDPMaxForced = d.TDPMaxForced
+	}
+	if l.TempMin <= 0 {
+		l.TempMin = d.TempMin
+	}
+	if l.TempMax <= 0 {
+		l.TempMax = d.TempMax
+	}
+	if len(l.StockProfilePPT) == 0 {
+		l.StockProfilePPT = d.StockProfilePPT
+	}
+
+	// Ordering and width invariants, not just presence. A per-field default fixes
+	// a value the daemon never sent; these catch values it sent that cannot be
+	// true together, which a zero check cannot see.
+	//
+	// Each group falls back whole rather than nudging one field, because an
+	// inconsistent triple does not say which of its members is the wrong one.
+	if l.TDPMin >= l.TDPMaxSafe || l.TDPMaxSafe > l.TDPMaxForced {
+		l.TDPMin, l.TDPMaxSafe, l.TDPMaxForced = d.TDPMin, d.TDPMaxSafe, d.TDPMaxForced
+	}
+
+	// The temperature axis has to be wide enough for the curve's points to hold
+	// strictly increasing temperatures. Below that EnforceCurve cannot satisfy
+	// both monotonicity and the bounds, and emits points under TempMin that the
+	// daemon rejects; at TempMin == TempMax the editor's coordinate mapping
+	// divides by zero and every point lands on a NaN. The invariant was asserted
+	// in the tests but never enforced, so it held only for limits compiled in.
+	if l.TempMax-l.TempMin < CurvePoints-1 {
+		l.TempMin, l.TempMax = d.TempMin, d.TempMax
+	}
+
+	// A floor above the hwmon maximum would clamp every curve point to full speed.
+	if l.HighTDPMinPWM < PWMMin {
+		l.HighTDPMinPWM = PWMMin
+	}
+	if l.HighTDPMinPWM > PWMMax {
+		l.HighTDPMinPWM = PWMMax
+	}
+	return l
+}
+
+// BasicSliderMax is the ceiling of the drawer's single-slider basic view.
+//
+// Presentation policy, but derived rather than fixed: it only means anything as
+// "a little under the safe max". A hardcoded 70 would be nonsense on a device
+// whose safe sustained limit is 54.
+func (l Limits) BasicSliderMax() int {
+	const headroom = 5
+	if m := l.TDPMaxSafe - headroom; m > l.TDPMin {
+		return m
+	}
+	return l.TDPMin
+}
+
+// ForceRequired reports whether a TDP request needs the force flag, which the
+// daemon demands for a sustained limit above TDPMaxSafe.
+func (l Limits) ForceRequired(pl1 int) bool {
+	return pl1 > l.TDPMaxSafe
+}
+
+// FanFloorPWM returns the minimum fan PWM the daemon will accept for a curve
+// point given the applied sustained limit, or PWMMin when unconstrained.
+//
+// While pl1 is above TDPMaxSafe the daemon rejects any curve containing a point
+// below HighTDPMinPWM, and refuses a fan reset outright — firmware auto has no
+// floor at all, so releasing the fans there would remove the very protection the
+// power limit requires. Resetting the TDP is the way back out.
+func (l Limits) FanFloorPWM(pl1 int) int {
+	if pl1 <= l.TDPMaxSafe {
+		return PWMMin
+	}
+	return l.HighTDPMinPWM
+}
+
+// IsStockPPT reports whether a TDP reading matches some stock profile's firmware
+// defaults exactly, meaning the user has not diverged from what the firmware
+// would set on its own.
+//
+// An exact match on a genuinely user-chosen triple is possible but harmless: it
+// only means the drawer offers the basic view for values the basic view would
+// reproduce unchanged.
+func (l Limits) IsStockPPT(t api.TDPState) bool {
+	for _, s := range l.StockProfilePPT {
+		if t.PL1SPL == s.PL1SPL && t.PL2SPPT == s.PL2SPPT && t.FPPT == s.FPPT {
+			return true
+		}
+	}
+	return false
+}
+
+// NeedsAdvanced reports whether a TDP state can only be shown accurately in the
+// drawer's advanced view.
+//
+// Basic mode is a single slider that applies one value to all three power limits
+// and stops at BasicSliderMax, so it cannot represent either a sustained limit
+// above that ceiling or a state where the three limits differ. Showing such a
+// state in basic mode would clamp the slider and misreport the hardware — and
+// worse, a subsequent save would send the clamped value and quietly lower the
+// limit.
+//
+// Only settings the user actually chose count, which takes two checks rather than
+// one. On a stock profile the daemon reports that profile's own PPT defaults,
+// whose limits legitimately differ — balanced is 52/71/70 — so the profile must
+// be custom. But saving a fan curve or an undervolt is enough to flip the daemon
+// to the custom profile on its own, leaving the power limits at the firmware's
+// values, so the reading must also differ from the stock defaults.
+//
+// A basic save round-trips as PL1 == PL2 == FPPT, because the daemon defaults the
+// blank PL fields to the single value, so an equal triple never trips this.
+func (l Limits) NeedsAdvanced(profile string, t api.TDPState) bool {
+	if profile != ProfileCustom || l.IsStockPPT(t) {
+		return false
+	}
+	if t.PL1SPL > l.BasicSliderMax() {
+		return true
+	}
+	return t.PL1SPL != t.PL2SPPT || t.PL2SPPT != t.FPPT
+}
+
+// FanCurveIsCustom reports whether a fan curve reported by the daemon is actually
+// in force, and therefore worth displaying.
+//
+// The curve registers keep the last written points even after the fans are
+// released to firmware auto, so the points alone cannot tell you anything:
+// switching to a stock profile resets the mode to FanModeAuto but leaves the old
+// custom points perfectly readable. Drawing them then shows the user a curve the
+// firmware is not following.
+func FanCurveIsCustom(fc *api.FanCurveState) bool {
+	return fc != nil && fc.Mode == FanModeCustom && len(fc.Points) == CurvePoints
+}
+
+// Curve is an 8-point fan curve, ordered by ascending temperature.
+type Curve [CurvePoints]api.FanCurvePoint
+
+// DefaultCurve returns the curve shown before the daemon reports one, fitted to
+// this device's temperature range.
+//
+// The shape is hand-tuned for the Z13 and is returned unchanged there. On a
+// device with a narrower range EnforceCurve pulls it into bounds; the result is
+// no longer hand-tuned, but it is valid, which is what matters for a placeholder.
+func (l Limits) DefaultCurve() Curve {
+	c := Curve{
+		{Temp: 35, PWM: 0},
+		{Temp: 45, PWM: 25},
+		{Temp: 50, PWM: 50},
+		{Temp: 60, PWM: 80},
+		{Temp: 70, PWM: 120},
+		{Temp: 80, PWM: 170},
+		{Temp: 90, PWM: 220},
+		{Temp: 100, PWM: 255},
+	}
+	l.EnforceCurve(&c, 0, PWMMin)
+	return c
+}
+
+// String renders the curve in the daemon's "temp:pwm,temp:pwm,..." wire format.
+func (c Curve) String() string {
+	parts := make([]string, 0, len(c))
+	for _, p := range c {
+		parts = append(parts, fmt.Sprintf("%d:%d", p.Temp, p.PWM))
+	}
+	return strings.Join(parts, ",")
+}
+
+// EnforceCurve repairs the curve after point idx has been moved, so that it
+// always satisfies what the firmware and daemon require:
+//
+//   - temperatures strictly increase
+//   - PWM never decreases
+//   - every point sits within [minPWM, PWMMax] and [TempMin, TempMax]
+//
+// minPWM comes from FanFloorPWM. Passing the floor in rather than deriving it
+// here keeps the rule in one place and makes the clamping directly testable at
+// both floor settings.
+//
+// The moved point is clamped first so it wins over its neighbours, then the
+// change cascades outward in both directions, then a final pass re-clamps
+// everything — cascading can push a neighbour past a bound.
+//
+// The moved point's temperature is clamped into a range that leaves room for the
+// points on either side: each of the idx points below it needs at least one
+// degree, as does each of the points above. Clamping it to the raw TempMin
+// instead would push its left-hand neighbours below the minimum, and the final
+// clamp would then pile them all onto TempMin — producing duplicate temperatures
+// that are not strictly increasing.
+func (l Limits) EnforceCurve(c *Curve, idx, minPWM int) {
+	if idx < 0 || idx >= len(c) {
+		return
+	}
+	clamp := func(p *api.FanCurvePoint) {
+		if p.Temp < l.TempMin {
+			p.Temp = l.TempMin
+		}
+		if p.Temp > l.TempMax {
+			p.Temp = l.TempMax
+		}
+		if p.PWM < minPWM {
+			p.PWM = minPWM
+		}
+		if p.PWM > PWMMax {
+			p.PWM = PWMMax
+		}
+	}
+
+	clamp(&c[idx])
+	if lo := l.TempMin + idx; c[idx].Temp < lo {
+		c[idx].Temp = lo
+	}
+	if hi := l.TempMax - (len(c) - 1 - idx); c[idx].Temp > hi {
+		c[idx].Temp = hi
+	}
+
+	// Temperatures must strictly increase.
+	for i := idx + 1; i < len(c); i++ {
+		if c[i].Temp <= c[i-1].Temp {
+			c[i].Temp = c[i-1].Temp + 1
+		}
+	}
+	for i := idx - 1; i >= 0; i-- {
+		if c[i].Temp >= c[i+1].Temp {
+			c[i].Temp = c[i+1].Temp - 1
+		}
+	}
+
+	// PWM must not decrease.
+	for i := idx + 1; i < len(c); i++ {
+		if c[i].PWM < c[i-1].PWM {
+			c[i].PWM = c[i-1].PWM
+		}
+	}
+	for i := idx - 1; i >= 0; i-- {
+		if c[i].PWM > c[i+1].PWM {
+			c[i].PWM = c[i+1].PWM
+		}
+	}
+
+	for i := range c {
+		clamp(&c[i])
+	}
+
+	// That clamp can collapse several points onto the same bound — a curve
+	// carried over from a device with a wider temperature range, for instance,
+	// where every point above the new maximum lands on it. Re-spread so the
+	// strictly-increasing invariant holds for any input, not just for curves that
+	// were already valid. Clamping PWM needs no equivalent: a monotone clamp
+	// preserves ordering.
+	for i := 1; i < len(c); i++ {
+		if c[i].Temp <= c[i-1].Temp {
+			c[i].Temp = c[i-1].Temp + 1
+		}
+	}
+	// The forward spread can push the tail past the maximum; pull it back from
+	// the end. There is always room because TempMax-TempMin is at least
+	// CurvePoints-1 for any sane device.
+	if last := len(c) - 1; c[last].Temp > l.TempMax {
+		c[last].Temp = l.TempMax
+	}
+	for i := len(c) - 2; i >= 0; i-- {
+		if c[i].Temp >= c[i+1].Temp {
+			c[i].Temp = c[i+1].Temp - 1
+		}
+	}
+}

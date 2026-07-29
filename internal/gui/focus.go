@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 package gui
 
 // focus.go — 2D grid gamepad focus navigation with modal slider editing.
@@ -12,22 +15,22 @@ package gui
 
 import (
 	"log/slog"
-	"sort"
 
+	"github.com/dahui/z13gui/internal/focusgrid"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
 // focusItem represents a single gamepad-navigable element.
 type focusItem struct {
-	widget     gtk.Widgetter // widget to highlight with .gamepad-focus
-	row        int           // visual row number
-	col        int           // column within row
-	section    string        // section name for shoulder-button jumping
-	isVisible  func() bool   // false if parent section is hidden; nil = always visible
-	onActivate func()        // A button: toggle/activate (non-editable items)
-	editable   bool          // true for sliders — A enters edit mode instead of activating
-	onLeft     func()        // D-pad left while editing: decrease value
-	onRight    func()        // D-pad right while editing: increase value
+	widget     gtk.Widgetter  // widget to highlight with .gamepad-focus
+	row        int            // visual row number
+	col        int            // column within row
+	section    string         // section name for shoulder-button jumping
+	isVisible  func() bool    // false if parent section is hidden; nil = always visible
+	onActivate func()         // A button: toggle/activate (non-editable items)
+	editable   bool           // true for sliders — A enters edit mode instead of activating
+	onLeft     func()         // D-pad left while editing: decrease value
+	onRight    func()         // D-pad right while editing: increase value
 	getValue   func() float64 // read current value (for cancel/restore)
 	setValue   func(float64)  // restore value on cancel
 }
@@ -40,161 +43,46 @@ func (fi *focusItem) visible() bool {
 	return gtk.BaseWidget(fi.widget).IsVisible()
 }
 
-// visibleRows returns sorted unique row numbers that have at least one visible item.
-func (w *Window) visibleRows() []int {
-	seen := make(map[int]bool)
-	var rows []int
+// gridSnapshot flattens focusItems into the pure representation focusgrid works
+// on, evaluating each item's visibility exactly once so a single press sees a
+// consistent view even if a widget changes underneath it.
+func (w *Window) gridSnapshot() []focusgrid.Item {
+	items := make([]focusgrid.Item, len(w.focusItems))
 	for i := range w.focusItems {
 		fi := &w.focusItems[i]
-		if fi.visible() && !seen[fi.row] {
-			seen[fi.row] = true
-			rows = append(rows, fi.row)
+		items[i] = focusgrid.Item{
+			Row:     fi.row,
+			Col:     fi.col,
+			Section: fi.section,
+			Visible: fi.visible(),
 		}
 	}
-	sort.Ints(rows)
-	return rows
+	return items
+}
+
+// navigate applies a focusgrid move. The grid functions return the index
+// unchanged when a move is impossible and tolerate an out-of-range index, so
+// there is nothing to guard here.
+func (w *Window) navigate(move func([]focusgrid.Item, int, int) int, dir int) {
+	if next := move(w.gridSnapshot(), w.focusIdx, dir); next != w.focusIdx {
+		w.setFocusIdx(next)
+	}
 }
 
 // moveVertical moves focus to the nearest visible item in the next (dir=+1) or
-// previous (dir=-1) row. Preserves column position where possible.
-func (w *Window) moveVertical(dir int) {
-	if len(w.focusItems) == 0 {
-		return
-	}
-	rows := w.visibleRows()
-	if len(rows) == 0 {
-		return
-	}
-	current := w.focusItems[w.focusIdx]
-	targetCol := current.col
+// previous (dir=-1) row, preserving column where possible.
+func (w *Window) moveVertical(dir int) { w.navigate(focusgrid.MoveVertical, dir) }
 
-	// Find current row's position in visible rows.
-	curPos := -1
-	for i, r := range rows {
-		if r == current.row {
-			curPos = i
-			break
-		}
-	}
-	if curPos == -1 {
-		return
-	}
+// moveHorizontal moves focus within the current row, wrapping at its edges.
+func (w *Window) moveHorizontal(dir int) { w.navigate(focusgrid.MoveHorizontal, dir) }
 
-	// Step to next/prev row (wrapping).
-	nextPos := (curPos + dir + len(rows)) % len(rows)
-	if nextPos == curPos {
-		return // only one visible row
-	}
-	targetRow := rows[nextPos]
+// jumpSection jumps to the first visible item of the adjacent section.
+func (w *Window) jumpSection(dir int) { w.navigate(focusgrid.JumpSection, dir) }
 
-	// Find the item in targetRow with the closest column to targetCol.
-	best := -1
-	bestDist := 1<<31 - 1
-	for i := range w.focusItems {
-		fi := &w.focusItems[i]
-		if fi.row == targetRow && fi.visible() {
-			d := targetCol - fi.col
-			if d < 0 {
-				d = -d
-			}
-			if d < bestDist {
-				bestDist = d
-				best = i
-			}
-		}
-	}
-	if best >= 0 {
-		w.setFocusIdx(best)
-	}
-}
-
-// moveHorizontal moves focus to the next (dir=+1) or previous (dir=-1) visible
-// item within the same row. Wraps at row edges.
-func (w *Window) moveHorizontal(dir int) {
-	if len(w.focusItems) == 0 {
-		return
-	}
-	current := w.focusItems[w.focusIdx]
-
-	// Collect visible items in the same row, sorted by column.
-	var rowItems []int
-	for i := range w.focusItems {
-		fi := &w.focusItems[i]
-		if fi.row == current.row && fi.visible() {
-			rowItems = append(rowItems, i)
-		}
-	}
-	if len(rowItems) <= 1 {
-		return // single-item row, no horizontal movement
-	}
-	sort.Slice(rowItems, func(a, b int) bool {
-		return w.focusItems[rowItems[a]].col < w.focusItems[rowItems[b]].col
-	})
-
-	// Find current position within the row.
-	pos := -1
-	for i, idx := range rowItems {
-		if idx == w.focusIdx {
-			pos = i
-			break
-		}
-	}
-	if pos == -1 {
-		return
-	}
-
-	next := (pos + dir + len(rowItems)) % len(rowItems)
-	w.setFocusIdx(rowItems[next])
-}
-
-// jumpSection jumps to the first visible item of the next (dir=+1) or
-// previous (dir=-1) section.
-func (w *Window) jumpSection(dir int) {
-	if len(w.focusItems) == 0 {
-		return
-	}
-	current := w.focusItems[w.focusIdx].section
-
-	// Collect sections in row order.
-	var sections []string
-	seen := make(map[string]bool)
-	rows := w.visibleRows()
-	for _, r := range rows {
-		for i := range w.focusItems {
-			fi := &w.focusItems[i]
-			if fi.row == r && fi.visible() && !seen[fi.section] {
-				seen[fi.section] = true
-				sections = append(sections, fi.section)
-			}
-		}
-	}
-	if len(sections) <= 1 {
-		return
-	}
-
-	// Find current section position.
-	curPos := -1
-	for i, s := range sections {
-		if s == current {
-			curPos = i
-			break
-		}
-	}
-	if curPos == -1 {
-		return
-	}
-
-	// Step to next/prev section (wrapping).
-	nextPos := (curPos + dir + len(sections)) % len(sections)
-	target := sections[nextPos]
-
-	// Find first visible item in the target section.
-	for i := range w.focusItems {
-		fi := &w.focusItems[i]
-		if fi.section == target && fi.visible() {
-			w.setFocusIdx(i)
-			return
-		}
+// focusFirstVisible moves focus to the first visible item, if there is one.
+func (w *Window) focusFirstVisible() {
+	if idx := focusgrid.FirstVisible(w.gridSnapshot()); idx >= 0 {
+		w.setFocusIdx(idx)
 	}
 }
 
@@ -277,12 +165,7 @@ func (w *Window) showGamepadFocus() {
 		return
 	}
 	w.gamepadActive = true
-	for i := range w.focusItems {
-		if w.focusItems[i].visible() {
-			w.setFocusIdx(i)
-			return
-		}
-	}
+	w.focusFirstVisible()
 }
 
 // hideGamepadFocus removes the gamepad focus indicator (e.g. on mouse movement).
@@ -310,12 +193,7 @@ func (w *Window) swapFocusList(items []focusItem) {
 	w.focusItems = items
 	w.focusIdx = 0
 	if w.gamepadActive {
-		for i := range w.focusItems {
-			if w.focusItems[i].visible() {
-				w.setFocusIdx(i)
-				return
-			}
-		}
+		w.focusFirstVisible()
 	}
 }
 

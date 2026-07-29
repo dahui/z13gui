@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 package theme
 
 import "strings"
@@ -33,16 +36,12 @@ func ParseThemeTOMLFull(data []byte) (Colors, []Accent) {
 			continue
 		}
 
-		// Strip inline comments.
-		if i := strings.Index(line, " #"); i >= 0 {
-			line = strings.TrimSpace(line[:i])
-		}
 		k, v, ok := strings.Cut(line, "=")
 		if !ok {
 			continue
 		}
 		k = strings.TrimSpace(k)
-		v = strings.Trim(strings.TrimSpace(v), `"'`)
+		v = parseValue(v)
 		if !IsHexColor(v) {
 			continue
 		}
@@ -71,9 +70,36 @@ func ParseThemeTOMLFull(data []byte) (Colors, []Accent) {
 			c.TextDim = v
 		case "border":
 			c.Border = v
+		case "error":
+			c.Error = v
 		}
 	}
 	return c, accents
+}
+
+// parseValue extracts the value from the right-hand side of a `key = value` line,
+// handling both quoted and bare forms and discarding any trailing comment.
+//
+// The comment stripping has to happen after the value is isolated, not before.
+// Scanning the whole line for " #" first meant the bare form documented here —
+// `accent = #ff0000` — had its own value taken for a comment, leaving an empty
+// string that silently fell back to the default. A hex colour begins with the
+// same character a comment does, which is what made a line-level scan wrong.
+func parseValue(rhs string) string {
+	v := strings.TrimSpace(rhs)
+	if v != "" && (v[0] == '"' || v[0] == '\'') {
+		quote := v[0]
+		if end := strings.IndexByte(v[1:], quote); end >= 0 {
+			return v[1 : 1+end]
+		}
+		return strings.Trim(v, `"'`) // unterminated quote; salvage what is there
+	}
+	// Bare value: everything up to the first space, which drops a trailing comment
+	// without mistaking the value's own leading '#' for one.
+	if i := strings.IndexAny(v, " \t"); i >= 0 {
+		v = v[:i]
+	}
+	return v
 }
 
 // titleCase uppercases the first byte of s. Only correct for ASCII strings,

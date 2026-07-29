@@ -17,7 +17,7 @@ It has two display backends:
 ## Companion project: z13ctl
 
 The `z13ctl` daemon (module `github.com/dahui/z13ctl`) is a sibling repo.
-Its `api/` submodule (`github.com/dahui/z13ctl/api`) is published at tag `api/v1.1.6`
+Its `api/` submodule (`github.com/dahui/z13ctl/api`) is published at tag `api/v1.1.7`
 on GitHub.
 
 During local development, a `go.work` file in this repo (if present, gitignored) provides
@@ -35,9 +35,9 @@ internal/gui/
   controls.go                   All GTK widget construction (drawer, views, bottom bar)
   tdp.go                        Custom profile view: TDP sliders, fan curve editor, undervolt, telemetry
   sync.go                       Daemon state sync and API send functions
-  color.go                      colorInput struct, HSL conversion, color picker view logic
-  focus.go                      2D grid gamepad focus navigation + modal slider editing
-  log.go                        Split-level slog handler (app vs GTK noise filtering)
+  color.go                      colorInput widget + color picker view (math in internal/colorconv)
+  errbar.go                     Error bar: reportError/clearError, the only user-facing error surface
+  focus.go                      Focus widget adaptor (navigation logic in internal/focusgrid)
   layout.css                    Embedded structural CSS (touch targets, sizing) — PRIORITY_APPLICATION
   theme-default.css             Embedded theme template with @define-color placeholders — PRIORITY_USER
   theme-default.toml            Embedded default theme colors (rog-dark), used by --print-theme
@@ -59,12 +59,22 @@ internal/gui/gamepad/hidblocker/
 internal/gui/gamescope/
   gamescope.go                  Gamescope X11 overlay backend (Steam Gaming Mode)
 internal/theme/
-  theme.go                      Theme types, TOML parsing, CSS generation, config persistence
-  builtins.go                   15 built-in themes (8 dark, 7 light) with accent variants
-  theme_test.go                 Theme parsing and CSS generation tests
-internal/togglegate/
-  togglegate.go                 Pure debounce helper for duplicate gui-toggle bursts
-  togglegate_test.go            Unit tests (pure Go, no GTK4)
+  theme.go                      Colors struct (8 tokens), 15 built-in themes, accent variants
+  parse.go                      theme.toml parsing; starts from DefaultColors so missing keys
+                                inherit defaults — this is what keeps old theme.toml files working
+                                when a new color token is added
+  css.go                        @define-color generation from a Colors value
+  config.go                     Config persistence (selected theme/accent)
+  *_test.go                     Theme parsing, CSS generation, and built-in completeness tests
+internal/power/                 Limits value: TDP/fan bounds + rules (mirrors z13ctl internal/cli)
+internal/daemon/                Err(handled, err): collapses an api result pair into one error
+internal/focusgrid/             Gamepad focus navigation: row/col/section index math
+internal/keyrepeat/             Tracker: which held direction owns the gamepad auto-repeat
+internal/colorconv/             hex <-> HSL/RGB conversion and colour validation
+internal/lighting/              RGB mode resolution, per-mode controls, defaults
+internal/uiscale/               Gamescope UI scale factor (cannot live in the cgo package)
+internal/startup/               CLI arg scanning + split-level slog handler
+internal/togglegate/            Debounce helper for duplicate gui-toggle bursts
 contrib/
   z13gui.service                systemd user service (EnvironmentFile for gamescope-session)
   z13gui.desktop                Desktop entry
@@ -111,6 +121,97 @@ contrib/
 - **State source of truth**: daemon is the source of truth. On show, `api.SendGetState()`
   is called and `syncState()` updates widgets. Widget signals are suppressed during sync
   via `Window.syncing bool`.
+- **Error surface** (`errbar.go`): every daemon call reports failures through
+  `w.reportError(op, err)` and clears on success with `clearError()`/`clearErrorAsync()`.
+  The bar is appended to `outer` between `viewStack` and the bottom bar, so one instance
+  covers all four views in both backends. Its dismiss button is in every view's focus
+  grid via `errBarFocusItem()` at `errBarRow` — without that a controller cannot
+  dismiss an error at all. `reportError` drops the message when the drawer is already
+  closed, so a call still in flight at close does not leave the bar up for the next
+  open; the journal still has it. **Never drop a daemon error into `slog` alone** —
+  that is what made z13ctl issue #14 look like a dead button for weeks. `reportError` is
+  safe from any goroutine (it marshals via `glib.IdleAdd`) and logs internally, so call
+  sites should not also `slog.Warn`.
+- **`handled == false` means the daemon is not running, and it is not an error.**
+  Every `api.Send*` returns `(handled bool, err error)`; when the socket dial fails
+  it returns `handled=false, err=nil`, because nothing was sent. **Never test `err`
+  alone** — wrap every call in `daemon.Err(api.SendX(...))`, which takes the result
+  pair directly so a site cannot read one and forget the other. All thirteen call
+  sites used to discard `handled`, so with the daemon stopped every operation took
+  its success path: `Save TDP` cleared the error bar, logged "custom TDP saved" and
+  left the typed values on screen. That is z13ctl issue #14's dead-button failure
+  rebuilt one layer up, and it defeated the error bar entirely.
+  `internal/daemon`'s contract test dials a temp `XDG_RUNTIME_DIR` to pin the api
+  convention rather than trusting its doc comment.
+  - The telemetry poll is the one deliberate exception, and says so in a comment:
+    it is a background poll, and reporting it every second would overwrite
+    whatever error the user was reading.
+- **Daemon calls must not run on the GTK thread**: `api` commands carry a 10s deadline
+  (`commandTimeout`, api v1.1.7), so an inline call freezes the drawer for up to 10s
+  against a wedged daemon. Read widget values on the main thread, then do the socket
+  round-trip in a goroutine — see `sendApply()` in `sync.go` for the pattern.
+- **Decisions live outside `internal/gui`; widgets live inside it.** `internal/gui`
+  needs CGO + GTK4 headers, so `make test` cannot even compile it — anything left in
+  there is permanently unverifiable. Every rule, calculation or classification
+  belongs in a pure package (`power`, `focusgrid`, `colorconv`, `lighting`,
+  `uiscale`, `startup`, `togglegate`); the GTK files are thin adaptors that read
+  widgets, call out, and apply the answer. Extracting logic this way has caught
+  seven real bugs so far, none of which were found by reading the code.
+  - `make test` derives its package list with
+    `go list ./internal/... | grep -v /internal/gui`, so a new pure package is
+    picked up automatically — nothing to remember.
+  - **Never read or write a GTK widget from a goroutine.** GTK is not thread-safe;
+    this is undefined behaviour, not a stale read. Snapshot widget values on the
+    main thread into plain data, then do the socket call in the goroutine — see
+    `readTdpRequest`/`tdpRequest.send` in `tdp.go` and `sendApply` in `sync.go`.
+    Come back to the main thread with `glib.IdleAdd`.
+  - **`Window.visible` is an `atomic.Bool`, and it is the only `Window` field any
+    goroutine may touch.** The gamepad reader gates every event on it, so a plain
+    bool there is a data race — and because `internal/gui` is excluded from
+    `go test -race`, nothing would ever report it. Anything else a goroutine needs
+    must be passed to it as plain data, not read off `Window`.
+- **Ordering matters for anything a goroutine applies to the outside world.**
+  `show`/`hide` issue their gamepad grab and release from separate goroutines, so
+  the two race: a grab landing after a hide leaves every controller exclusively
+  grabbed with nothing on screen and no input reaching the game, and a release
+  landing after a re-show (easy inside the gamescope path's deliberate 200ms delay)
+  hands the game the same D-pad presses navigating the drawer. `Window.grabGen` is
+  incremented on the GTK thread and passed to `gamepad.Reader.SetGrabbed(seq, grab)`,
+  which drops superseded requests. Add a sequence to any similar pair.
+- **Device limits are a value, not constants.** `power.Limits` holds the TDP range,
+  fan floor, temperature axis and stock PPT table; `Window.limits` is initialised to
+  `power.DefaultLimits()` (the Z13's values). **No TDP or fan bound may be hardcoded
+  in `internal/gui`** — derive it from `w.limits` / `fc.limits()`, because z13ctl is
+  being extended to devices with different envelopes. The design brief for the
+  eventual daemon-served limits is in z13ctl's `.claude/plans/device-limits-api.md`;
+  when it lands, only where `Window.limits` is assigned changes.
+  - Presentation policy stays derived, not fixed: `BasicSliderMax()` is
+    `TDPMaxSafe - 5`, not a literal 70, because 70 is meaningless on a device whose
+    safe max is 54.
+  - `Sanitized()` replaces zero fields with defaults, for the day a daemon older
+    than the client omits one, **and enforces the ordering/width invariants** that
+    a zero check cannot see: `TDPMin < TDPMaxSafe <= TDPMaxForced`, and a
+    temperature axis at least `CurvePoints-1` wide. Each group falls back whole,
+    because an inconsistent triple does not say which member is wrong. Without the
+    width check a narrow axis makes `EnforceCurve` emit points below `TempMin` that
+    the daemon rejects, and `TempMin == TempMax` divides by zero in the editor's
+    coordinate mapping. The invariant was asserted in the tests but not enforced,
+    so it held only for limits compiled in — exactly what breaks when the daemon
+    starts serving them. `HighTDPMinPWM` is exempt from the zero check — 0
+    legitimately means "no fan floor on this device" — but is clamped to `PWMMax`.
+  - `power.Curve` is a fixed `[8]` array. If a device ever needs a different point
+    count it becomes a slice and the compile-time length guarantee is lost.
+- **High-TDP fan floor**: while sustained PL1 exceeds 75W the daemon rejects any fan
+  curve point below 204 PWM (80%) and refuses a fan reset outright. `fanFloorPWM()`
+  derives this from applied daemon state (not slider position); `enforceConstraints`
+  clamps drags to it, `fanCurveEditor.draw` renders the floor line, and `resetFanBtn` is
+  desensitized with a tooltip pointing at Reset TDP. Both the threshold and the
+  floor come from `w.limits`, not from literals.
+- **Basic vs advanced TDP view**: basic mode is one slider applying a single value to
+  all three limits, capped at 70W. `power.NeedsAdvanced` decides whether a state can be
+  shown there; `syncCustomView` force-checks the Advanced box when it cannot. Without
+  that the slider clamps, the label misreports the hardware, and a save sends the
+  clamped value — silently lowering the user's power limit.
 - **Subscribe loop**: background goroutine, exponential backoff reconnect, dispatches
   `Toggle()` onto the GTK main thread via `glib.TimeoutAdd(0, ...)` followed by
   `MainContextDefault().Wakeup()` (the wakeup is required — the loop may deliver an
@@ -130,6 +231,15 @@ contrib/
   out of the struct makes it unreachable from the main thread and removes any chance of
   an unsynchronized read. Do not promote it to a field — reading it from `show()`/
   `hide()` would be a data race, and `internal/gui` is not covered by `go test -race`.
+- **Anything painted rather than styled must apply the scale and theme itself.**
+  The fan curve chart is Cairo, so it reads neither the `@z13-*` tokens nor the
+  gamescope CSS scaling. `Backend.Scale()` returns 1.0 on layer-shell and the
+  resolution factor under gamescope; `Window.colors` holds the active palette
+  alongside the CSS built from it. Every dimension in `fanCurveEditor.draw` and
+  `hitTest` multiplies by `fc.scale()` — `.fan-curve-area` grew with resolution
+  while the 6px points and 20px grab radius stayed at 1x, so the drag targets got
+  harder to hit the larger the output. `applyTheme`/`applyCustomAccent` call
+  `redrawFanCurve()`, since swapping the CSS provider does not repaint Cairo.
 - **CSS architecture**:
   - `layout.css` → `STYLE_PROVIDER_PRIORITY_APPLICATION` (structural, not overridable)
   - `theme-default.css` → `STYLE_PROVIDER_PRIORITY_USER` (colors, user-overridable)
@@ -142,6 +252,8 @@ contrib/
     - `.section-label` — section headers ("TDP", "UNDERVOLT", "FAN CURVE"): 11px, bold, letter-spaced, dim
     - `.scale-name` — slider name labels ("PL1 (SPL)", "CPU Curve Optimizer"): 10px, bold, no letter-spacing, dim
     - `.scale-value` — slider value readouts ("50 W", "CPU CO: -20"): 10px, normal weight, bright
+    - `.error-bar` / `.error-text` / `.error-dismiss` — error surface; colored via the
+      `@z13-error` theme token, as is `.tdp-warning`
 - **Profile selector**: buttons (`gtk.Button`), stored in
   `w.profileBtns map[string]*gtk.Button`. Not DropDown (popup broken in gamescope).
 - **Focus-loss dismiss** (layer-shell): `EventControllerMotion` tracks `pointerInside`
@@ -175,16 +287,31 @@ The gamescope backend renders z13gui as an X11 overlay in Steam Gaming Mode.
 - **Popups don't work**: GTK4 popovers/dropdowns create separate X11 windows that
   gamescope doesn't composite. Solved via view switching (see below).
 
-### View switching (gamescope only)
+### View switching
 
-In both KDE and gamescope modes, `buildContent()` wraps content in a `gtk.Stack` with 4 pages:
+`buildContent()` wraps content in a `gtk.Stack` with 4 pages, in **both** backends:
 - `"main"` — normal drawer (profiles, RGB, battery, etc.)
 - `"custom"` — custom profile view (TDP, fan curve, undervolt, telemetry)
-- `"theme"` — theme picker (radio buttons + accent dots, replaces popover in gamescope)
-- `"color"` — HSL color picker (H/S/L sliders + presets + preview, replaces popover in gamescope)
+- `"theme"` — theme picker (radio buttons + accent dots)
+- `"color"` — HSL color picker (H/S/L sliders + presets + preview)
 
 Bottom bar stays visible across all views. `hide()` resets to "main".
-In KDE mode, theme/color views use popovers instead of stack pages.
+
+**There are no popovers left anywhere.** The stack replaced them in both modes
+(`e19f76f`, which added gamepad support) because one navigable widget tree is what
+makes gamepad focus work identically in both backends — not only because popovers
+are uncompositable under gamescope. `grep Popover internal/` returns nothing, and
+it should stay that way; reintroducing one would need a second focus-list mechanism
+and would be invisible in Gaming Mode.
+
+That conversion left CSS behind, which is worth knowing about because it hid a real
+regression for months: `popover.z13-popover` rules (12 of them) and
+`.bottom-bar menubutton > button` outlived the widgets they selected, and the
+latter was the theme-picker button's only colour styling — so it silently fell back
+to stock GTK colours and stopped following the theme. Both are now removed, with
+`.bottom-bar button` / `.view-back-btn` styled directly. **When a widget type
+changes, grep the CSS for its element selector**: a rule that no longer matches
+fails silently and looks like a theming gap rather than dead code.
 
 ### Service environment
 
@@ -273,10 +400,16 @@ make release    # goreleaser build + publish
 
 Requires at build time: `gtk4-layer-shell` C library (`pkg-config gtk4-layer-shell-0`).
 
-`make test` enumerates the pure-Go packages explicitly (`internal/theme`,
-`internal/togglegate`) rather than using `./...`, because `internal/gui` needs CGO and
-GTK4 headers. **Add new pure-Go packages to the `test` and `cover` targets** — otherwise
-their tests never run; there is no CI test job (the only workflow is release).
+`make test` derives its package list from `go list ./internal/...` minus
+`internal/gui`, because `internal/gui` needs CGO and GTK4 headers while `go list`
+only reads source. A new pure package is therefore tested automatically. `make race`
+runs the same set under the race detector; `make cover` reports per-function
+coverage.
+
+CI (`.github/workflows/ci.yml`) runs tests + race on plain ubuntu and
+build + gofmt + lint in the same Arch container as the release job. Before this
+existed nothing ran tests on a push, which is how PR #10 merged tests that never
+executed.
 
 ## Known GTK issues (do not re-introduce)
 
@@ -293,7 +426,9 @@ their tests never run; there is no CI test job (the only workflow is release).
 - **`box-shadow` on animated containers** — shadow pixels extend outside the widget clip
   region and are not cleared each frame in Wayland Vulkan rendering, causing smearing.
 - **GTK4 popovers in gamescope** — create separate override-redirect X11 windows that
-  gamescope doesn't composite. Use `gtk.Stack` view switching instead (gamescope only).
+  gamescope doesn't composite. Use `gtk.Stack` view switching instead, in **both**
+  backends: one widget tree is what lets the gamepad focus grid work the same way in
+  each, so a KDE-only popover would still be the wrong answer.
 - **GDK_SCALE in gamescope** — causes double scaling (GTK scales buffer, then gamescope
   scaler scales again). Use manual CSS scaling via `scaledCSS()` instead.
 - **GtkDropDown in gamescope** — popup list is a separate X11 window. Use buttons or

@@ -1,3 +1,6 @@
+/* Copyright 2026 Jeff Hagadorn
+   SPDX-License-Identifier: Apache-2.0 */
+
 /* z13gui default theme — ROG dark red.
    To create a custom theme, copy this file to:
        $XDG_CONFIG_HOME/z13gui/theme.css   (usually ~/.config/z13gui/theme.css)
@@ -11,7 +14,11 @@
      @z13-text        — primary text
      @z13-text-dim    — secondary/label text
      @z13-border      — window border and separator color
-     @z13-radius      — window corner radius (requires GTK 4.12+)
+     @z13-error       — error bar text and border, high-TDP warning text
+
+   Every one of those is defined below, so this file works as a standalone
+   theme.css. That matters: theme.css is loaded verbatim, unlike theme.toml,
+   whose values are substituted into a copy of this file at startup.
 
    All element-level rules are scoped to .drawer (or window.z13-drawer-window).
 
@@ -25,6 +32,7 @@
 @define-color z13-text        #e0e0e0;
 @define-color z13-text-dim    #888888;
 @define-color z13-border      #444444;
+@define-color z13-error       #ff4444;
 
 /* Window — transparent background so border-radius from .drawer is visible. */
 window.z13-drawer-window {
@@ -109,7 +117,17 @@ window.z13-drawer-window {
 
 /* TDP warning label */
 .tdp-warning {
-    color: #ff4444;
+    color: @z13-error;
+}
+
+/* Error bar */
+.error-bar {
+    background: @z13-surface;
+    border: 1px solid @z13-error;
+}
+
+.error-bar .error-text {
+    color: @z13-error;
 }
 
 /* Fan curve drawing area */
@@ -143,58 +161,34 @@ window.z13-drawer-window {
     border: 1px solid @z13-text;
 }
 
-/* Bottom bar — palette menu button */
-.bottom-bar menubutton > button {
+/* Icon buttons that sit outside the button groups: the bottom bar's theme
+   picker and the back button in the custom, theme and colour views. These are
+   the only buttons not covered by .btn-group, and they were previously styled
+   as `menubutton > button` — a widget the drawer stopped using when popovers
+   were replaced by stack views, so the rule silently stopped matching and the
+   theme picker button fell back to the stock GTK button colours. */
+.bottom-bar button,
+.view-back-btn {
     background: @z13-surface;
     color: @z13-text;
     border: 1px solid @z13-border;
 }
 
-.bottom-bar menubutton > button:hover {
+.bottom-bar button:hover,
+.view-back-btn:hover {
     background: @z13-surface-alt;
 }
 
-/* Popovers (theme picker, color chooser) — not inside .drawer */
-popover.z13-popover > contents {
-    background: @z13-surface;
-    color: @z13-text;
-    border: 1px solid @z13-border;
-    border-radius: 8px;
+/* Error bar dismiss — transparent rather than surface-coloured, since the bar
+   itself is @z13-surface and a filled button on it would disappear. */
+.error-bar .error-dismiss {
+    background: transparent;
+    color: @z13-error;
+    border: none;
 }
 
-/* Checkbuttons inside popovers (theme radio list) */
-popover.z13-popover checkbutton {
-    color: @z13-text;
-    background: @z13-bg;
-}
-
-popover.z13-popover checkbutton:hover {
+.error-bar .error-dismiss:hover {
     background: @z13-surface-alt;
-}
-
-popover.z13-popover checkbutton:checked {
-    background: @z13-accent;
-    color: #ffffff;
-}
-
-popover.z13-popover checkbutton indicator {
-    background: @z13-bg;
-    border: 1px solid @z13-border;
-    border-radius: 50%;
-}
-
-popover.z13-popover checkbutton:checked indicator {
-    background: @z13-accent;
-    border-color: @z13-accent;
-}
-
-/* Labels inside popovers */
-popover.z13-popover .section-label {
-    color: @z13-text-dim;
-}
-
-popover.z13-popover .accent-label {
-    color: @z13-text-dim;
 }
 
 /* Active accent dot — theme-aware border (visible on both dark and light) */

@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 package theme
 
 import "testing"
@@ -46,6 +49,7 @@ surface_alt = "#333333"
 text = "#eeeeee"
 text_dim = "#999999"
 border = "#555555"
+error = "#ff8888"
 `)
 	c := ParseThemeTOML(data)
 	if c.Accent != "#ff0000" {
@@ -68,6 +72,31 @@ border = "#555555"
 	}
 	if c.Border != "#555555" {
 		t.Errorf("Border = %q, want #555555", c.Border)
+	}
+	if c.Error != "#ff8888" {
+		t.Errorf("Error = %q, want #ff8888", c.Error)
+	}
+}
+
+// A theme.toml written before the error color existed must keep working: the
+// parser starts from DefaultColors, so the missing key inherits the default
+// rather than producing an empty @define-color that would break the stylesheet.
+func TestParseThemeTOML_PreErrorKeyThemeStillWorks(t *testing.T) {
+	data := []byte(`
+accent = "#ff0000"
+background = "#111111"
+surface = "#222222"
+surface_alt = "#333333"
+text = "#eeeeee"
+text_dim = "#999999"
+border = "#555555"
+`)
+	c := ParseThemeTOML(data)
+	if c.Error != DefaultColors.Error {
+		t.Errorf("Error = %q, want default %q", c.Error, DefaultColors.Error)
+	}
+	if !IsHexColor(c.Error) {
+		t.Errorf("Error = %q is not a valid hex color; generated CSS would be malformed", c.Error)
 	}
 }
 
@@ -313,5 +342,67 @@ blue = "#0000ff"
 	}
 	if c.Background != "#111111" {
 		t.Errorf("Background = %q, want #111111", c.Background)
+	}
+}
+
+// TestParseThemeTOMLValueForms covers both spellings the doc comment promises,
+// with and without a trailing comment.
+//
+// The bare form never worked: comments were stripped by scanning the whole line
+// for " #" before the value was isolated, and a hex colour starts with the same
+// character a comment does — so `accent = #ff0000` had its own value taken for a
+// comment and fell back to the default without a word.
+func TestParseThemeTOMLValueForms(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{"quoted", `accent = "#ff0000"`},
+		{"bare", `accent = #ff0000`},
+		{"quoted with comment", `accent = "#ff0000" # brand red`},
+		{"bare with comment", `accent = #ff0000 # brand red`},
+		{"no spaces around equals", `accent="#ff0000"`},
+		{"single quotes", `accent = '#ff0000'`},
+		{"extra whitespace", `   accent   =   "#ff0000"   `},
+		{"tab before comment", "accent = #ff0000\t# red"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ParseThemeTOML([]byte(tt.in)).Accent; got != "#ff0000" {
+				t.Errorf("ParseThemeTOML(%q).Accent = %q, want %q", tt.in, got, "#ff0000")
+			}
+		})
+	}
+}
+
+// A comment-only or malformed line must leave the default alone rather than
+// setting something odd.
+func TestParseThemeTOMLIgnoresJunk(t *testing.T) {
+	for _, in := range []string{
+		`# accent = "#ff0000"`,
+		`accent =`,
+		`accent = ""`,
+		`accent = not-a-colour`,
+		`accent = "#12345"`,
+		`accent`,
+	} {
+		if got := ParseThemeTOML([]byte(in)).Accent; got != DefaultColors.Accent {
+			t.Errorf("ParseThemeTOML(%q).Accent = %q, want the default %q",
+				in, got, DefaultColors.Accent)
+		}
+	}
+}
+
+// Bare values work in the [accents] section too, since it uses the same parser.
+func TestParseAccentsAcceptsBareValues(t *testing.T) {
+	_, accents := ParseThemeTOMLFull([]byte("[accents]\nblue = #89b4fa\nred = \"#f38ba8\" # muted\n"))
+	if len(accents) != 2 {
+		t.Fatalf("got %d accents, want 2: %+v", len(accents), accents)
+	}
+	if accents[0].ID != "blue" || accents[0].Hex != "#89b4fa" {
+		t.Errorf("accents[0] = %+v, want blue/#89b4fa", accents[0])
+	}
+	if accents[1].ID != "red" || accents[1].Hex != "#f38ba8" {
+		t.Errorf("accents[1] = %+v, want red/#f38ba8", accents[1])
 	}
 }

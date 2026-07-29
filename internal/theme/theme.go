@@ -1,6 +1,9 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 package theme
 
-// Colors holds the 7 named color values that drive the entire GUI theme.
+// Colors holds the 8 named color values that drive the entire GUI theme.
 // Each field is a CSS hex color string like "#cc0000".
 type Colors struct {
 	Accent     string // @z13-accent      — active buttons, slider fill, checked states
@@ -10,10 +13,13 @@ type Colors struct {
 	Text       string // @z13-text        — primary text
 	TextDim    string // @z13-text-dim    — section labels, secondary text
 	Border     string // @z13-border      — window border, separators
+	Error      string // @z13-error       — error bar text/border, high-TDP warning
 }
 
 // DefaultColors is the ROG Dark default color set, used as the fallback when
-// no theme is selected or a user theme.toml omits a color key.
+// no theme is selected or a user theme.toml omits a color key. Parsing starts
+// from this value, so a theme.toml written before a color was introduced keeps
+// working — it simply inherits the default for the key it does not mention.
 var DefaultColors = Colors{
 	Accent:     "#cc0000",
 	Background: "#1a1a1a",
@@ -22,6 +28,7 @@ var DefaultColors = Colors{
 	Text:       "#e0e0e0",
 	TextDim:    "#888888",
 	Border:     "#444444",
+	Error:      "#ff4444",
 }
 
 // Accent is an alternate accent color for a theme. Catppuccin themes, for
@@ -35,8 +42,8 @@ type Accent struct {
 // Builtin pairs a theme ID and display name with its color definition
 // and optional accent color variants.
 type Builtin struct {
-	ID      string   // config key, e.g. "catppuccin-mocha"
-	Name    string   // display name shown in the theme picker
+	ID      string // config key, e.g. "catppuccin-mocha"
+	Name    string // display name shown in the theme picker
 	Colors  Colors
 	Accents []Accent // optional accent variants; first = default (matches Colors.Accent)
 }
@@ -118,67 +125,67 @@ var catppuccinMacchiatoAccents = []Accent{
 var Builtins = []Builtin{
 	{
 		ID: "catppuccin-frappe", Name: "Catppuccin Frappe",
-		Colors:  Colors{Accent: "#ca9ee6", Background: "#303446", Surface: "#414559", SurfaceAlt: "#51576d", Text: "#c6d0f5", TextDim: "#a5adce", Border: "#626880"},
+		Colors:  Colors{Accent: "#ca9ee6", Background: "#303446", Surface: "#414559", SurfaceAlt: "#51576d", Text: "#c6d0f5", TextDim: "#a5adce", Border: "#626880", Error: "#e78284"},
 		Accents: catppuccinFrappeAccents,
 	},
 	{
 		ID: "catppuccin-latte", Name: "Catppuccin Latte",
-		Colors:  Colors{Accent: "#8839ef", Background: "#eff1f5", Surface: "#e6e9ef", SurfaceAlt: "#dce0e8", Text: "#4c4f69", TextDim: "#7c7f93", Border: "#bcc0cc"},
+		Colors:  Colors{Accent: "#8839ef", Background: "#eff1f5", Surface: "#e6e9ef", SurfaceAlt: "#dce0e8", Text: "#4c4f69", TextDim: "#7c7f93", Border: "#bcc0cc", Error: "#d20f39"},
 		Accents: catppuccinLatteAccents,
 	},
 	{
 		ID: "catppuccin-macchiato", Name: "Catppuccin Macchiato",
-		Colors:  Colors{Accent: "#c6a0f6", Background: "#24273a", Surface: "#363a4f", SurfaceAlt: "#494d64", Text: "#cad3f5", TextDim: "#a5adcb", Border: "#5b6078"},
+		Colors:  Colors{Accent: "#c6a0f6", Background: "#24273a", Surface: "#363a4f", SurfaceAlt: "#494d64", Text: "#cad3f5", TextDim: "#a5adcb", Border: "#5b6078", Error: "#ed8796"},
 		Accents: catppuccinMacchiatoAccents,
 	},
 	{
 		ID: "catppuccin-mocha", Name: "Catppuccin Mocha",
-		Colors:  Colors{Accent: "#cba6f7", Background: "#1e1e2e", Surface: "#313244", SurfaceAlt: "#45475a", Text: "#cdd6f4", TextDim: "#a6adc8", Border: "#585b70"},
+		Colors:  Colors{Accent: "#cba6f7", Background: "#1e1e2e", Surface: "#313244", SurfaceAlt: "#45475a", Text: "#cdd6f4", TextDim: "#a6adc8", Border: "#585b70", Error: "#f38ba8"},
 		Accents: catppuccinMochaAccents,
 	},
 	{
 		ID: "everforest-light", Name: "Everforest Light",
-		Colors: Colors{Accent: "#8da101", Background: "#fdf6e3", Surface: "#f4f0d9", SurfaceAlt: "#efebd4", Text: "#5c6a72", TextDim: "#859289", Border: "#bdc3af"},
+		Colors: Colors{Accent: "#8da101", Background: "#fdf6e3", Surface: "#f4f0d9", SurfaceAlt: "#efebd4", Text: "#5c6a72", TextDim: "#859289", Border: "#bdc3af", Error: "#f85552"},
 	},
 	{
 		ID: "github-light", Name: "GitHub Light",
-		Colors: Colors{Accent: "#0969da", Background: "#ffffff", Surface: "#f6f8fa", SurfaceAlt: "#f3f4f6", Text: "#1f2328", TextDim: "#59636e", Border: "#d1d9e0"},
+		Colors: Colors{Accent: "#0969da", Background: "#ffffff", Surface: "#f6f8fa", SurfaceAlt: "#f3f4f6", Text: "#1f2328", TextDim: "#59636e", Border: "#d1d9e0", Error: "#cf222e"},
 	},
 	{
 		ID: "gruvbox-dark", Name: "Gruvbox Dark",
-		Colors: Colors{Accent: "#fe8019", Background: "#282828", Surface: "#3c3836", SurfaceAlt: "#504945", Text: "#ebdbb2", TextDim: "#a89984", Border: "#665c54"},
+		Colors: Colors{Accent: "#fe8019", Background: "#282828", Surface: "#3c3836", SurfaceAlt: "#504945", Text: "#ebdbb2", TextDim: "#a89984", Border: "#665c54", Error: "#fb4934"},
 	},
 	{
 		ID: "gruvbox-light", Name: "Gruvbox Light",
-		Colors: Colors{Accent: "#d65d0e", Background: "#fbf1c7", Surface: "#ebdbb2", SurfaceAlt: "#d5c4a1", Text: "#3c3836", TextDim: "#7c6f64", Border: "#bdae93"},
+		Colors: Colors{Accent: "#d65d0e", Background: "#fbf1c7", Surface: "#ebdbb2", SurfaceAlt: "#d5c4a1", Text: "#3c3836", TextDim: "#7c6f64", Border: "#bdae93", Error: "#9d0006"},
 	},
 	{
 		ID: "nord", Name: "Nord",
-		Colors: Colors{Accent: "#88c0d0", Background: "#2e3440", Surface: "#3b4252", SurfaceAlt: "#434c5e", Text: "#eceff4", TextDim: "#d8dee9", Border: "#4c566a"},
+		Colors: Colors{Accent: "#88c0d0", Background: "#2e3440", Surface: "#3b4252", SurfaceAlt: "#434c5e", Text: "#eceff4", TextDim: "#d8dee9", Border: "#4c566a", Error: "#bf616a"},
 	},
 	{
 		ID: "one-light", Name: "One Light",
-		Colors: Colors{Accent: "#4078f2", Background: "#fafafa", Surface: "#f0f0f0", SurfaceAlt: "#e5e5e6", Text: "#383a42", TextDim: "#696c77", Border: "#d0d0d0"},
+		Colors: Colors{Accent: "#4078f2", Background: "#fafafa", Surface: "#f0f0f0", SurfaceAlt: "#e5e5e6", Text: "#383a42", TextDim: "#696c77", Border: "#d0d0d0", Error: "#e45649"},
 	},
 	{
 		ID: "rog-dark", Name: "ROG Dark",
-		Colors: Colors{Accent: "#cc0000", Background: "#1a1a1a", Surface: "#2a2a2a", SurfaceAlt: "#333333", Text: "#e0e0e0", TextDim: "#888888", Border: "#444444"},
+		Colors: Colors{Accent: "#cc0000", Background: "#1a1a1a", Surface: "#2a2a2a", SurfaceAlt: "#333333", Text: "#e0e0e0", TextDim: "#888888", Border: "#444444", Error: "#ff4444"},
 	},
 	{
 		ID: "rog-neon", Name: "ROG Neon",
-		Colors: Colors{Accent: "#00d4ff", Background: "#0d0d14", Surface: "#1a1a2e", SurfaceAlt: "#16213e", Text: "#e0e0f0", TextDim: "#8888aa", Border: "#2a2a4a"},
+		Colors: Colors{Accent: "#00d4ff", Background: "#0d0d14", Surface: "#1a1a2e", SurfaceAlt: "#16213e", Text: "#e0e0f0", TextDim: "#8888aa", Border: "#2a2a4a", Error: "#ff3366"},
 	},
 	{
 		ID: "rose-pine-dawn", Name: "Rose Pine Dawn",
-		Colors: Colors{Accent: "#d7827e", Background: "#faf4ed", Surface: "#f2e9e1", SurfaceAlt: "#ede3e0", Text: "#575279", TextDim: "#9893a5", Border: "#dfdad9"},
+		Colors: Colors{Accent: "#d7827e", Background: "#faf4ed", Surface: "#f2e9e1", SurfaceAlt: "#ede3e0", Text: "#575279", TextDim: "#9893a5", Border: "#dfdad9", Error: "#b4637a"},
 	},
 	{
 		ID: "solarized-light", Name: "Solarized Light",
-		Colors: Colors{Accent: "#268bd2", Background: "#fdf6e3", Surface: "#eee8d5", SurfaceAlt: "#e8e2ce", Text: "#657b83", TextDim: "#839496", Border: "#d3c9b0"},
+		Colors: Colors{Accent: "#268bd2", Background: "#fdf6e3", Surface: "#eee8d5", SurfaceAlt: "#e8e2ce", Text: "#657b83", TextDim: "#839496", Border: "#d3c9b0", Error: "#dc322f"},
 	},
 	{
 		ID: "tokyo-night", Name: "Tokyo Night",
-		Colors: Colors{Accent: "#7aa2f7", Background: "#1a1b26", Surface: "#24283b", SurfaceAlt: "#2f3549", Text: "#c0caf5", TextDim: "#565f89", Border: "#292e42"},
+		Colors: Colors{Accent: "#7aa2f7", Background: "#1a1b26", Surface: "#24283b", SurfaceAlt: "#2f3549", Text: "#c0caf5", TextDim: "#565f89", Border: "#292e42", Error: "#f7768e"},
 	},
 }
 

@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 package gui
 
 // tdp.go — Custom profile view: TDP sliders, fan curve editor, telemetry.
@@ -6,145 +9,142 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"strings"
 
 	"github.com/dahui/z13ctl/api"
+	"github.com/dahui/z13gui/internal/colorconv"
+	"github.com/dahui/z13gui/internal/daemon"
+	"github.com/dahui/z13gui/internal/power"
+	"github.com/dahui/z13gui/internal/theme"
 	"github.com/diamondburned/gotk4/pkg/cairo"
 	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
-// TDP limits (matching daemon constants).
-const (
-	tdpMin         = 5
-	tdpMaxBasic    = 70 // basic slider max
-	tdpMaxSafe     = 75 // warning threshold
-	tdpMaxAdvanced = 93 // advanced slider max (force=true above 75)
-)
-
 // fanCurveEditor renders and handles interaction for the 8-point fan curve.
+// The curve model and its constraint rules live in internal/power; this type
+// owns only the drawing and pointer handling.
 type fanCurveEditor struct {
 	area     *gtk.DrawingArea
-	points   [8]api.FanCurvePoint // temp: 0–120°C, pwm: 0–255
-	dragging int                  // point index being dragged, -1 if none
-	hovered  int                  // point index under cursor, -1 if none
-	w        *Window              // parent for theme colors + telemetry
+	points   power.Curve // temp/PWM bounds come from Window.limits
+	dragging int         // point index being dragged, -1 if none
+	hovered  int         // point index under cursor, -1 if none
+	w        *Window     // parent for theme colors + telemetry
 
 	// Chart area within the DrawingArea (set during draw).
 	chartX, chartY, chartW, chartH float64
 }
 
-// defaultFanCurve returns a reasonable default fan curve.
-func defaultFanCurve() [8]api.FanCurvePoint {
-	return [8]api.FanCurvePoint{
-		{Temp: 35, PWM: 0},
-		{Temp: 45, PWM: 25},
-		{Temp: 50, PWM: 50},
-		{Temp: 60, PWM: 80},
-		{Temp: 70, PWM: 120},
-		{Temp: 80, PWM: 170},
-		{Temp: 90, PWM: 220},
-		{Temp: 100, PWM: 255},
-	}
-}
-
 // curveString returns the curve in "temp:pwm,temp:pwm,..." format for the API.
-func (fc *fanCurveEditor) curveString() string {
-	var parts []string
-	for _, p := range fc.points {
-		parts = append(parts, fmt.Sprintf("%d:%d", p.Temp, p.PWM))
+func (fc *fanCurveEditor) curveString() string { return fc.points.String() }
+
+// limits returns the device envelope driving the editor's axes and clamping,
+// falling back to the defaults when the editor has no parent window.
+func (fc *fanCurveEditor) limits() power.Limits {
+	if fc.w == nil {
+		return power.DefaultLimits()
 	}
-	return strings.Join(parts, ",")
+	return fc.w.limits
 }
 
-// enforceConstraints ensures temps are strictly increasing and PWM non-decreasing.
-func (fc *fanCurveEditor) enforceConstraints(idx int) {
-	// Clamp the dragged point first.
-	if fc.points[idx].Temp < 35 {
-		fc.points[idx].Temp = 35
-	}
-	if fc.points[idx].Temp > 105 {
-		fc.points[idx].Temp = 105
-	}
-	if fc.points[idx].PWM < 0 {
-		fc.points[idx].PWM = 0
-	}
-	if fc.points[idx].PWM > 255 {
-		fc.points[idx].PWM = 255
-	}
+// tempRange is the editor's x axis, in Celsius.
+func (fc *fanCurveEditor) tempRange() (lo, hi int) {
+	l := fc.limits()
+	return l.TempMin, l.TempMax
+}
 
-	// Cascade temps forward (must be strictly increasing).
-	for i := idx + 1; i < 8; i++ {
-		if fc.points[i].Temp <= fc.points[i-1].Temp {
-			fc.points[i].Temp = fc.points[i-1].Temp + 1
-		}
+// fanFloorPWM returns the minimum fan PWM the daemon will currently accept.
+//
+// Derived from the daemon's applied state rather than the slider position: the
+// daemon validates against hardware, and a slider the user has moved but not
+// saved has not been applied. Must be called from the GTK main thread.
+func (w *Window) fanFloorPWM() int {
+	if w.state == nil || w.state.TDP == nil {
+		return power.PWMMin
 	}
-	// Cascade temps backward.
-	for i := idx - 1; i >= 0; i-- {
-		if fc.points[i].Temp >= fc.points[i+1].Temp {
-			fc.points[i].Temp = fc.points[i+1].Temp - 1
-		}
+	return w.limits.FanFloorPWM(w.state.TDP.PL1SPL)
+}
+
+// minPWM is the editor's view of fanFloorPWM, safe when the editor has no parent.
+func (fc *fanCurveEditor) minPWM() int {
+	if fc.w == nil {
+		return power.PWMMin
 	}
-	// Cascade PWM forward (must be non-decreasing).
-	for i := idx + 1; i < 8; i++ {
-		if fc.points[i].PWM < fc.points[i-1].PWM {
-			fc.points[i].PWM = fc.points[i-1].PWM
-		}
-	}
-	// Cascade PWM backward.
-	for i := idx - 1; i >= 0; i-- {
-		if fc.points[i].PWM > fc.points[i+1].PWM {
-			fc.points[i].PWM = fc.points[i+1].PWM
-		}
-	}
-	// Final clamp pass.
-	for i := range fc.points {
-		if fc.points[i].Temp < 35 {
-			fc.points[i].Temp = 35
-		}
-		if fc.points[i].Temp > 105 {
-			fc.points[i].Temp = 105
-		}
-		if fc.points[i].PWM < 0 {
-			fc.points[i].PWM = 0
-		}
-		if fc.points[i].PWM > 255 {
-			fc.points[i].PWM = 255
-		}
-	}
+	return fc.w.fanFloorPWM()
+}
+
+// enforceConstraints repairs the curve after point idx moved. The rules live in
+// internal/power, where they are unit tested.
+func (fc *fanCurveEditor) enforceConstraints(idx int) {
+	fc.limits().EnforceCurve(&fc.points, idx, fc.minPWM())
 }
 
 // Coordinate mapping.
 func (fc *fanCurveEditor) tempToX(temp int) float64 {
-	return fc.chartX + (float64(temp-35)/70.0)*fc.chartW // 35–105°C range
+	lo, hi := fc.tempRange()
+	return fc.chartX + (float64(temp-lo)/float64(hi-lo))*fc.chartW
 }
 func (fc *fanCurveEditor) pwmToY(pwm int) float64 {
-	return fc.chartY + fc.chartH - (float64(pwm)/255.0)*fc.chartH // inverted
+	return fc.chartY + fc.chartH - (float64(pwm)/float64(power.PWMMax))*fc.chartH // inverted
 }
 func (fc *fanCurveEditor) xToTemp(x float64) int {
-	t := 35 + int(math.Round((x-fc.chartX)/fc.chartW*70.0))
-	if t < 35 {
-		t = 35
+	lo, hi := fc.tempRange()
+	t := lo + int(math.Round((x-fc.chartX)/fc.chartW*float64(hi-lo)))
+	if t < lo {
+		t = lo
 	}
-	if t > 105 {
-		t = 105
+	if t > hi {
+		t = hi
 	}
 	return t
 }
 func (fc *fanCurveEditor) yToPWM(y float64) int {
-	p := int(math.Round((fc.chartY + fc.chartH - y) / fc.chartH * 255.0))
-	if p < 0 {
-		p = 0
+	p := int(math.Round((fc.chartY + fc.chartH - y) / fc.chartH * float64(power.PWMMax)))
+	if p < power.PWMMin {
+		p = power.PWMMin
 	}
-	if p > 255 {
-		p = 255
+	if p > power.PWMMax {
+		p = power.PWMMax
 	}
 	return p
 }
 
+// scale returns the factor the drawer's sizes are multiplied by: 1.0 on
+// layer-shell, resolution-derived under gamescope. Everything drawn here is
+// Cairo rather than CSS, so it has to apply the factor itself — the chart grew
+// with .fan-curve-area while the points, fonts and margins stayed at 1x, which
+// left the grab targets progressively harder to hit as resolution went up.
+func (fc *fanCurveEditor) scale() float64 {
+	if fc.w == nil || fc.w.backend == nil {
+		return 1.0
+	}
+	if s := fc.w.backend.Scale(); s > 0 {
+		return s
+	}
+	return 1.0
+}
+
+// rgb returns the theme colour named by hex as Cairo components, falling back to
+// the default palette's value when the theme supplied something unparseable —
+// drawing the zero value would be black, which vanishes on a dark background.
+func (fc *fanCurveEditor) rgb(hex, fallback string) (r, g, b float64) {
+	if cr, cg, cb, ok := colorconv.RGB(hex); ok {
+		return cr, cg, cb
+	}
+	if cr, cg, cb, ok := colorconv.RGB(fallback); ok {
+		return cr, cg, cb
+	}
+	return 1, 1, 1
+}
+
+// pointRadius is the drawn radius of a curve point, and hitRadius the distance
+// within which a press grabs one. The hit radius is deliberately the larger:
+// these are dragged with a thumb on a touchscreen.
+func (fc *fanCurveEditor) pointRadius() float64 { return 6.0 * fc.scale() }
+func (fc *fanCurveEditor) hitRadius() float64   { return 20.0 * fc.scale() }
+
 // hitTest returns the index of the point nearest to (x,y) within tolerance, or -1.
 func (fc *fanCurveEditor) hitTest(x, y float64) int {
-	const tolerance = 20.0
+	tolerance := fc.hitRadius()
 	best := -1
 	bestDist := tolerance * tolerance
 	for i, p := range fc.points {
@@ -165,32 +165,47 @@ func (fc *fanCurveEditor) hitTest(x, y float64) int {
 func (fc *fanCurveEditor) draw(cr *cairo.Context, width, height int) {
 	w := float64(width)
 	h := float64(height)
+	s := fc.scale()
+	th := theme.DefaultColors
+	if fc.w != nil {
+		th = fc.w.colors
+	}
+	fontSize := 9 * s
 
-	// Chart margins.
-	const leftMargin = 36.0
-	const bottomMargin = 20.0
-	const topMargin = 8.0
-	const rightMargin = 8.0
+	// Chart margins. Scaled with everything else: the y-axis labels have to fit in
+	// leftMargin, and they grow with fontSize.
+	leftMargin := 36.0 * s
+	bottomMargin := 20.0 * s
+	topMargin := 8.0 * s
+	rightMargin := 8.0 * s
 	fc.chartX = leftMargin
 	fc.chartY = topMargin
 	fc.chartW = w - leftMargin - rightMargin
 	fc.chartH = h - topMargin - bottomMargin
+
+	// Nothing sensible to draw if the widget has not been allocated a usable size
+	// yet; the coordinate helpers divide by chartW/chartH.
+	if fc.chartW <= 0 || fc.chartH <= 0 {
+		return
+	}
 
 	// Background.
 	cr.SetSourceRGBA(0, 0, 0, 0) // transparent — CSS handles bg
 	cr.Paint()
 
 	// Grid lines.
-	cr.SetSourceRGBA(0.4, 0.4, 0.4, 0.3)
-	cr.SetLineWidth(0.5)
+	gr, gg, gb := fc.rgb(th.Border, theme.DefaultColors.Border)
+	cr.SetSourceRGBA(gr, gg, gb, 0.6)
+	cr.SetLineWidth(0.5 * s)
 	// Horizontal: 0%, 25%, 50%, 75%, 100%.
 	for _, pct := range []float64{0, 25, 50, 75, 100} {
-		y := fc.pwmToY(int(pct / 100.0 * 255))
+		y := fc.pwmToY(int(pct / 100.0 * power.PWMMax))
 		cr.MoveTo(fc.chartX, y)
 		cr.LineTo(fc.chartX+fc.chartW, y)
 	}
-	// Vertical: every 10°C from 35 to 105.
-	for temp := 35; temp <= 105; temp += 10 {
+	// Vertical: every 10°C across the device's range.
+	tLo, tHi := fc.tempRange()
+	for temp := tLo; temp <= tHi; temp += 10 {
 		x := fc.tempToX(temp)
 		cr.MoveTo(x, fc.chartY)
 		cr.LineTo(x, fc.chartY+fc.chartH)
@@ -198,29 +213,52 @@ func (fc *fanCurveEditor) draw(cr *cairo.Context, width, height int) {
 	cr.Stroke()
 
 	// Axis labels.
-	cr.SetSourceRGBA(0.6, 0.6, 0.6, 1)
-	cr.SetFontSize(9)
+	dr, dg, db := fc.rgb(th.TextDim, theme.DefaultColors.TextDim)
+	cr.SetSourceRGBA(dr, dg, db, 1)
+	cr.SetFontSize(fontSize)
 	// Y-axis labels.
 	for _, pct := range []int{0, 25, 50, 75, 100} {
-		y := fc.pwmToY(int(float64(pct) / 100.0 * 255))
-		cr.MoveTo(2, y+3)
+		y := fc.pwmToY(int(float64(pct) / 100.0 * power.PWMMax))
+		cr.MoveTo(2*s, y+3*s)
 		cr.ShowText(fmt.Sprintf("%d%%", pct))
 	}
 	// X-axis labels.
-	for temp := 40; temp <= 100; temp += 20 {
+	for temp := tLo + 5; temp <= tHi-5; temp += 20 {
 		x := fc.tempToX(temp)
-		cr.MoveTo(x-8, fc.chartY+fc.chartH+14)
+		cr.MoveTo(x-8*s, fc.chartY+fc.chartH+14*s)
 		cr.ShowText(fmt.Sprintf("%d°", temp))
+	}
+
+	// High-TDP fan floor. While sustained TDP is above the safe max the daemon
+	// rejects any point below this line, and enforceConstraints holds drags at or
+	// above it — drawing it explains why the points will not go lower.
+	if floor := fc.minPWM(); floor > 0 {
+		fy := fc.pwmToY(floor)
+		// Same @z13-error token as the error bar and .tdp-warning: this line marks
+		// a limit the daemon enforces, so it should read as the theme's warning
+		// colour rather than a hardcoded red that clashes with light palettes.
+		er, eg, eb := fc.rgb(th.Error, theme.DefaultColors.Error)
+		cr.SetSourceRGBA(er, eg, eb, 0.9)
+		cr.SetLineWidth(1.5 * s)
+		cr.SetDash([]float64{6 * s, 3 * s}, 0)
+		cr.MoveTo(fc.chartX, fy)
+		cr.LineTo(fc.chartX+fc.chartW, fy)
+		cr.Stroke()
+		cr.SetDash(nil, 0)
+		cr.SetFontSize(fontSize)
+		cr.MoveTo(fc.chartX+4*s, fy-4*s)
+		cr.ShowText(fmt.Sprintf("%d%% min (TDP > %dW)", floor*100/power.PWMMax, fc.limits().TDPMaxSafe))
 	}
 
 	// Current APU temperature indicator line.
 	if fc.w != nil && fc.w.state != nil && fc.w.state.Temperature > 0 {
 		apuTemp := fc.w.state.Temperature
-		if apuTemp >= 35 && apuTemp <= 105 {
+		if apuTemp >= tLo && apuTemp <= tHi {
 			tx := fc.tempToX(apuTemp)
-			cr.SetSourceRGBA(1, 1, 1, 0.4)
-			cr.SetLineWidth(1)
-			cr.SetDash([]float64{4, 3}, 0)
+			tr, tg, tb := fc.rgb(th.Text, theme.DefaultColors.Text)
+			cr.SetSourceRGBA(tr, tg, tb, 0.4)
+			cr.SetLineWidth(1 * s)
+			cr.SetDash([]float64{4 * s, 3 * s}, 0)
 			cr.MoveTo(tx, fc.chartY)
 			cr.LineTo(tx, fc.chartY+fc.chartH)
 			cr.Stroke()
@@ -228,19 +266,21 @@ func (fc *fanCurveEditor) draw(cr *cairo.Context, width, height int) {
 		}
 	}
 
+	ar, ag, ab := fc.rgb(th.Accent, theme.DefaultColors.Accent)
+
 	// Filled area under curve.
-	cr.SetSourceRGBA(0.8, 0.1, 0.1, 0.15) // accent-ish, semi-transparent
+	cr.SetSourceRGBA(ar, ag, ab, 0.15)
 	cr.MoveTo(fc.tempToX(fc.points[0].Temp), fc.pwmToY(0))
 	for _, p := range fc.points {
 		cr.LineTo(fc.tempToX(p.Temp), fc.pwmToY(p.PWM))
 	}
-	cr.LineTo(fc.tempToX(fc.points[7].Temp), fc.pwmToY(0))
+	cr.LineTo(fc.tempToX(fc.points[len(fc.points)-1].Temp), fc.pwmToY(0))
 	cr.ClosePath()
 	cr.Fill()
 
 	// Line connecting points.
-	cr.SetSourceRGBA(0.8, 0.1, 0.1, 1) // accent color
-	cr.SetLineWidth(2)
+	cr.SetSourceRGBA(ar, ag, ab, 1)
+	cr.SetLineWidth(2 * s)
 	for i, p := range fc.points {
 		x := fc.tempToX(p.Temp)
 		y := fc.pwmToY(p.PWM)
@@ -253,18 +293,20 @@ func (fc *fanCurveEditor) draw(cr *cairo.Context, width, height int) {
 	cr.Stroke()
 
 	// Point circles.
+	hr, hg, hb := fc.rgb(th.Text, theme.DefaultColors.Text)
 	for i, p := range fc.points {
 		x := fc.tempToX(p.Temp)
 		y := fc.pwmToY(p.PWM)
-		radius := 6.0
+		radius := fc.pointRadius()
 		if i == fc.dragging || i == fc.hovered {
-			radius = 8.0
+			radius *= 8.0 / 6.0 // grown while active, in proportion
 			// Outer ring.
-			cr.SetSourceRGBA(1, 1, 1, 0.6)
-			cr.Arc(x, y, radius+2, 0, 2*math.Pi)
+			cr.SetSourceRGBA(hr, hg, hb, 0.6)
+			cr.SetLineWidth(1 * s)
+			cr.Arc(x, y, radius+2*s, 0, 2*math.Pi)
 			cr.Stroke()
 		}
-		cr.SetSourceRGBA(0.8, 0.1, 0.1, 1)
+		cr.SetSourceRGBA(ar, ag, ab, 1)
 		cr.Arc(x, y, radius, 0, 2*math.Pi)
 		cr.Fill()
 	}
@@ -276,12 +318,12 @@ func (w *Window) newFanCurveEditor() *fanCurveEditor {
 		dragging: -1,
 		hovered:  -1,
 		w:        w,
-		points:   defaultFanCurve(),
+		points:   w.limits.DefaultCurve(),
 	}
 
 	fc.area = gtk.NewDrawingArea()
 	fc.area.AddCSSClass("fan-curve-area")
-	fc.area.SetSizeRequest(-1, 240)
+	fc.area.SetSizeRequest(-1, 240) // .fan-curve-area scales this under gamescope
 	fc.area.SetDrawFunc(func(_ *gtk.DrawingArea, cr *cairo.Context, width, height int) {
 		fc.draw(cr, width, height)
 	})
@@ -399,7 +441,7 @@ func (w *Window) buildCustomView() *gtk.Box {
 
 	// Basic TDP box (visible by default).
 	tdpBasicBox := gtk.NewBox(gtk.OrientationVertical, 4)
-	w.tdpBasicScale = gtk.NewScaleWithRange(gtk.OrientationHorizontal, tdpMin, tdpMaxBasic, 1)
+	w.tdpBasicScale = gtk.NewScaleWithRange(gtk.OrientationHorizontal, float64(w.limits.TDPMin), float64(w.limits.BasicSliderMax()), 1)
 	w.tdpBasicScale.SetDigits(0)
 	w.tdpBasicScale.SetDrawValue(false)
 	w.tdpBasicScale.SetValue(float64(50))
@@ -417,7 +459,9 @@ func (w *Window) buildCustomView() *gtk.Box {
 	w.tdpAdvancedBox = gtk.NewBox(gtk.OrientationVertical, 4)
 	w.tdpAdvancedBox.SetVisible(false)
 
-	w.tdpWarningLabel = gtk.NewLabel("WARNING: Values above 75W may cause thermal throttling, instability, or hardware damage. Use at your own risk — we are not responsible for any damages.")
+	w.tdpWarningLabel = gtk.NewLabel(fmt.Sprintf(
+		"WARNING: Values above %dW may cause thermal throttling, instability, or hardware damage. Use at your own risk — we are not responsible for any damages.",
+		w.limits.TDPMaxSafe))
 	w.tdpWarningLabel.SetWrap(true)
 	w.tdpWarningLabel.SetHAlign(gtk.AlignStart)
 	w.tdpWarningLabel.AddCSSClass("tdp-warning")
@@ -540,7 +584,7 @@ func (w *Window) buildTdpScale(label, desc string) (*gtk.Scale, *gtk.Label) {
 	descLabel.SetWrap(true)
 	descLabel.AddCSSClass("scale-value")
 	w.tdpAdvancedBox.Append(descLabel)
-	sc := gtk.NewScaleWithRange(gtk.OrientationHorizontal, tdpMin, tdpMaxAdvanced, 1)
+	sc := gtk.NewScaleWithRange(gtk.OrientationHorizontal, float64(w.limits.TDPMin), float64(w.limits.TDPMaxForced), 1)
 	sc.SetDigits(0)
 	sc.SetDrawValue(false)
 	sc.SetValue(50)
@@ -598,8 +642,8 @@ func (w *Window) syncCustomView() {
 		tdp := w.state.TDP
 		if w.tdpBasicScale != nil {
 			v := float64(tdp.PL1SPL)
-			if v > tdpMaxBasic {
-				v = tdpMaxBasic
+			if m := float64(w.limits.BasicSliderMax()); v > m {
+				v = m
 			}
 			w.tdpBasicScale.SetValue(v)
 			w.tdpBasicLabel.SetLabel(fmt.Sprintf("%d W", int(v)))
@@ -616,13 +660,39 @@ func (w *Window) syncCustomView() {
 			w.tdpPL3Scale.SetValue(float64(tdp.FPPT))
 			w.tdpPL3Label.SetLabel(fmt.Sprintf("%d W", tdp.FPPT))
 		}
+
+		// Switch to the advanced view when the applied TDP cannot be expressed in
+		// basic mode. Otherwise the basic slider silently clamps and its label
+		// reports the clamped number, so the drawer claims 70W while the hardware
+		// runs at 80W. Only ever forced on, never off: once the user unchecks it
+		// that is a deliberate choice to edit in basic terms.
+		if w.tdpAdvancedCheck != nil && !w.tdpAdvancedCheck.Active() &&
+			w.limits.NeedsAdvanced(w.state.Profile, *tdp) {
+			w.tdpAdvancedCheck.SetActive(true)
+		}
 	}
 
-	// Fan curve.
-	if w.state.FanCurve != nil && len(w.state.FanCurve.Points) == 8 && w.fanCurve != nil {
-		copy(w.fanCurve.points[:], w.state.FanCurve.Points)
+	// Fan curve. Only adopt the daemon's points when the fans are actually
+	// following them: on a stock profile the fans are released to firmware auto
+	// but the curve registers still read back the last custom curve, so copying
+	// them unconditionally left the editor showing a curve that was not in force.
+	// Redraw either way — the PWM floor line depends on PL1, which may have just
+	// changed.
+	if w.fanCurve != nil {
+		if power.FanCurveIsCustom(w.state.FanCurve) {
+			copy(w.fanCurve.points[:], w.state.FanCurve.Points)
+		} else {
+			w.fanCurve.points = w.limits.DefaultCurve()
+		}
+	}
+	if w.fanCurve != nil {
+		// A curve saved while the floor was off can sit below it once a high TDP
+		// is applied. Lift it so what is drawn is what the daemon would accept.
+		w.fanCurve.enforceConstraints(0)
 		w.fanCurve.area.QueueDraw()
 	}
+
+	w.syncFanResetSensitivity()
 
 	// Undervolt.
 	if w.uvBox != nil {
@@ -646,159 +716,213 @@ func (w *Window) syncCustomView() {
 	}
 }
 
-// sendTdp sends the current TDP slider values to the daemon.
-func (w *Window) sendTdp() error {
-	if w.tdpAdvancedCheck != nil && w.tdpAdvancedCheck.Active() {
-		pl1 := fmt.Sprintf("%d", int(w.tdpPL1Scale.Value()))
-		pl2 := fmt.Sprintf("%d", int(w.tdpPL2Scale.Value()))
-		pl3 := fmt.Sprintf("%d", int(w.tdpPL3Scale.Value()))
-		maxPL := int(math.Max(w.tdpPL1Scale.Value(), math.Max(w.tdpPL2Scale.Value(), w.tdpPL3Scale.Value())))
-		force := maxPL > tdpMaxSafe
-		_, err := api.SendTdpSet(pl1, pl1, pl2, pl3, force)
-		return err
+// syncFanResetSensitivity enables or disables Reset Fans according to the applied
+// sustained limit.
+//
+// The daemon refuses a fan reset while the high-TDP floor is in force — firmware
+// auto has no floor, so releasing the fans there would remove the protection the
+// power limit requires. Reset TDP is the way out, which the tooltip says.
+//
+// Separate from syncCustomView because the telemetry poll also needs it: it
+// refreshes w.state every second, so a TDP change made elsewhere (the z13ctl CLI,
+// or another client) moves the floor line while the button kept its old
+// sensitivity until the next full sync.
+func (w *Window) syncFanResetSensitivity() {
+	if w.resetFanBtn == nil {
+		return
 	}
-	watts := fmt.Sprintf("%d", int(w.tdpBasicScale.Value()))
-	_, err := api.SendTdpSet(watts, "", "", "", false)
-	return err
+	floored := w.fanFloorPWM() > 0
+	w.resetFanBtn.SetSensitive(!floored)
+	if floored {
+		w.resetFanBtn.SetTooltipText(fmt.Sprintf(
+			"Unavailable while sustained TDP is above %dW — fans must stay at %d%% minimum. Use Reset TDP first.",
+			w.limits.TDPMaxSafe, w.limits.HighTDPMinPWM*100/power.PWMMax))
+		return
+	}
+	w.resetFanBtn.SetTooltipText("Reset fan curves to firmware auto")
 }
 
-// sendFanCurve sends the current fan curve to the daemon.
-func (w *Window) sendFanCurve() error {
+// tdpRequest is a snapshot of the TDP widgets, taken on the GTK thread so the
+// socket call can run in a goroutine without touching widgets from it.
+type tdpRequest struct {
+	watts, pl1, pl2, pl3 string
+	force                bool
+}
+
+// readTdpRequest snapshots the TDP sliders. **Must be called from the GTK main
+// thread** — GTK is not thread-safe, and reading a scale from a goroutine is
+// undefined behaviour, not merely a stale value.
+func (w *Window) readTdpRequest() tdpRequest {
+	if w.tdpAdvancedCheck != nil && w.tdpAdvancedCheck.Active() {
+		pl1v, pl2v, pl3v := w.tdpPL1Scale.Value(), w.tdpPL2Scale.Value(), w.tdpPL3Scale.Value()
+		pl1 := fmt.Sprintf("%d", int(pl1v))
+		maxPL := int(math.Max(pl1v, math.Max(pl2v, pl3v)))
+		return tdpRequest{
+			// watts doubles as the base value; the daemon parses it before it looks
+			// at the PL fields and rejects the request outright if it is empty.
+			watts: pl1,
+			pl1:   pl1,
+			pl2:   fmt.Sprintf("%d", int(pl2v)),
+			pl3:   fmt.Sprintf("%d", int(pl3v)),
+			force: w.limits.ForceRequired(maxPL),
+		}
+	}
+	return tdpRequest{watts: fmt.Sprintf("%d", int(w.tdpBasicScale.Value()))}
+}
+
+// send performs the socket round-trip. Safe to call from a goroutine — it holds
+// only plain strings.
+func (r tdpRequest) send() error {
+	return daemon.Err(api.SendTdpSet(r.watts, r.pl1, r.pl2, r.pl3, r.force))
+}
+
+// readFanCurve snapshots the fan curve as its wire string. Must be called from
+// the GTK main thread; returns "" when there is no editor to read.
+func (w *Window) readFanCurve() string {
 	if w.fanCurve == nil {
+		return ""
+	}
+	return w.fanCurve.curveString()
+}
+
+// sendFanCurve sends a previously snapshotted curve. Safe from a goroutine.
+func sendFanCurve(curve string) error {
+	if curve == "" {
 		return nil
 	}
-	_, err := api.SendFanCurveSet(w.fanCurve.curveString())
-	return err
+	return daemon.Err(api.SendFanCurveSet(curve))
 }
 
 // refreshProfile fetches state and updates the profile button highlight.
-func (w *Window) refreshProfile() {
-	ok, state, err := api.SendGetState()
-	if ok && err == nil {
-		glib.IdleAdd(func() {
-			w.state = state
-			w.syncing = true
-			w.syncProfile()
-			w.syncing = false
-		})
+// refreshState fetches daemon state and re-syncs both the custom view and the
+// profile buttons. Every custom-profile operation uses it rather than syncing the
+// profile alone: the fan curve editor's PWM floor is derived from the applied
+// PL1, so a TDP change has to re-evaluate the whole view, not just the highlight.
+// Safe to call from a background goroutine.
+func (w *Window) refreshState() {
+	ok, state, rawErr := api.SendGetState()
+	// Report a failed read rather than returning quietly. This runs after a
+	// successful write, so a failure here means the daemon went away in between
+	// and everything on screen is now stale — worth saying, since the widgets
+	// otherwise keep displaying values nothing is honouring.
+	if err := daemon.Err(ok, rawErr); err != nil {
+		w.reportError("Read daemon state", err)
+		return
 	}
+	if state == nil {
+		return
+	}
+	glib.IdleAdd(func() {
+		w.state = state
+		w.syncCustomView()
+		w.syncing = true
+		w.syncProfile()
+		w.syncing = false
+	})
 }
 
 // saveCustomTdp commits only the TDP values.
 func (w *Window) saveCustomTdp() {
+	req := w.readTdpRequest() // widget reads stay on the GTK thread
 	go func() {
-		if err := w.sendTdp(); err != nil {
-			slog.Warn("tdp set failed", "err", err)
+		if err := req.send(); err != nil {
+			w.reportError("Save TDP", err)
 			return
 		}
+		w.clearErrorAsync()
 		slog.Info("custom TDP saved")
-		w.refreshProfile()
+		w.refreshState()
 	}()
 }
 
 // saveCustomFanCurve commits only the fan curve.
 func (w *Window) saveCustomFanCurve() {
+	curve := w.readFanCurve() // widget read stays on the GTK thread
 	go func() {
-		if err := w.sendFanCurve(); err != nil {
-			slog.Warn("fan curve set failed", "err", err)
+		if err := sendFanCurve(curve); err != nil {
+			w.reportError("Save fan curve", err)
 			return
 		}
+		w.clearErrorAsync()
 		slog.Info("custom fan curve saved")
-		w.refreshProfile()
+		w.refreshState()
 	}()
 }
 
 // saveCustomBoth commits both TDP and fan curve.
 func (w *Window) saveCustomBoth() {
+	req := w.readTdpRequest() // widget reads stay on the GTK thread
+	curve := w.readFanCurve()
 	go func() {
-		tdpErr := w.sendTdp()
-		fanErr := w.sendFanCurve()
-		if tdpErr != nil {
-			slog.Warn("tdp set failed", "err", tdpErr)
-		}
-		if fanErr != nil {
-			slog.Warn("fan curve set failed", "err", fanErr)
-		}
-		if tdpErr == nil && fanErr == nil {
+		tdpErr := req.send()
+		fanErr := sendFanCurve(curve)
+		switch {
+		case tdpErr != nil:
+			// TDP first: a rejected TDP is usually why the fan write failed too
+			// (the daemon refuses a curve below the 80% floor while PL1 is high).
+			w.reportError("Save TDP", tdpErr)
+		case fanErr != nil:
+			w.reportError("Save fan curve", fanErr)
+		default:
+			w.clearErrorAsync()
 			slog.Info("custom profile saved (TDP + fans)")
 		}
-		w.refreshProfile()
+		w.refreshState()
 	}()
 }
 
 // resetTdp resets TDP to firmware defaults.
 func (w *Window) resetTdp() {
 	go func() {
-		if _, err := api.SendTdpReset(); err != nil {
-			slog.Warn("tdp reset failed", "err", err)
+		if err := daemon.Err(api.SendTdpReset()); err != nil {
+			w.reportError("Reset TDP", err)
 			return
 		}
+		w.clearErrorAsync()
 		slog.Info("tdp reset to defaults")
-		ok, state, err := api.SendGetState()
-		if ok && err == nil {
-			glib.IdleAdd(func() {
-				w.state = state
-				w.syncCustomView()
-				w.syncing = true
-				w.syncProfile()
-				w.syncing = false
-			})
-		}
+		w.refreshState()
 	}()
 }
 
 // resetFanCurve resets fan curves to firmware auto mode.
 func (w *Window) resetFanCurve() {
 	go func() {
-		if _, err := api.SendFanCurveReset(); err != nil {
-			slog.Warn("fan curve reset failed", "err", err)
+		if err := daemon.Err(api.SendFanCurveReset()); err != nil {
+			// The daemon refuses this while sustained TDP is above the safe max —
+			// firmware auto has no PWM floor. Reset TDP is the way out.
+			w.reportError("Reset fans", err)
 			return
 		}
+		w.clearErrorAsync()
 		slog.Info("fan curve reset to auto")
-		ok, state, err := api.SendGetState()
-		if ok && err == nil {
-			glib.IdleAdd(func() {
-				w.state = state
-				w.syncCustomView()
-				w.syncing = true
-				w.syncProfile()
-				w.syncing = false
-			})
-		}
+		w.refreshState()
 	}()
 }
 
 // saveUndervolt commits the current Curve Optimizer offsets to the daemon.
 func (w *Window) saveUndervolt() {
+	cpu := fmt.Sprintf("%d", int(w.uvCpuScale.Value())) // GTK thread
 	go func() {
-		cpu := fmt.Sprintf("%d", int(w.uvCpuScale.Value()))
-		if _, err := api.SendUndervoltSet(cpu); err != nil {
-			slog.Warn("undervolt set failed", "err", err)
+		if err := daemon.Err(api.SendUndervoltSet(cpu)); err != nil {
+			w.reportError("Save undervolt", err)
 			return
 		}
+		w.clearErrorAsync()
 		slog.Info("undervolt saved", "cpu", cpu)
-		w.refreshProfile()
+		w.refreshState()
 	}()
 }
 
 // resetUndervolt resets Curve Optimizer to stock (0).
 func (w *Window) resetUndervolt() {
 	go func() {
-		if _, err := api.SendUndervoltReset(); err != nil {
-			slog.Warn("undervolt reset failed", "err", err)
+		if err := daemon.Err(api.SendUndervoltReset()); err != nil {
+			w.reportError("Reset undervolt", err)
 			return
 		}
+		w.clearErrorAsync()
 		slog.Info("undervolt reset to stock")
-		ok, state, err := api.SendGetState()
-		if ok && err == nil {
-			glib.IdleAdd(func() {
-				w.state = state
-				w.syncCustomView()
-				w.syncing = true
-				w.syncProfile()
-				w.syncing = false
-			})
-		}
+		w.refreshState()
 	}()
 }
 
@@ -810,16 +934,31 @@ func (w *Window) startTelemetryPolling() {
 	w.telemetryGen++
 	gen := w.telemetryGen
 	glib.TimeoutAdd(1000, func() bool {
-		if gen != w.telemetryGen || !w.visible {
+		if gen != w.telemetryGen || !w.visible.Load() {
 			return false
 		}
+		// One request at a time. api commands carry a 10s deadline, so against a
+		// slow daemon a goroutine per tick meant ten overlapping requests whose
+		// replies could apply out of order and walk w.state backwards.
+		if w.telemetryBusy {
+			slog.Debug("telemetry: skipping tick, request still in flight")
+			return true
+		}
+		w.telemetryBusy = true
 		go func() {
 			ok, state, err := api.SendGetState()
-			if !ok || err != nil {
-				return
-			}
 			glib.IdleAdd(func() {
+				// Cleared unconditionally, including on the failure paths below:
+				// leaving it set would stop the poll for good.
+				w.telemetryBusy = false
 				if gen != w.telemetryGen {
+					return
+				}
+				// Deliberately silent, unlike every other daemon call: this is a
+				// background poll the user did not ask for, and reporting it would
+				// repaint the bar every second, overwriting whatever error they were
+				// reading. Their next action reports it — see refreshState.
+				if !ok || err != nil || state == nil {
 					return
 				}
 				w.state = state
@@ -840,6 +979,9 @@ func (w *Window) startTelemetryPolling() {
 					if w.fanCurve != nil {
 						w.fanCurve.area.QueueDraw()
 					}
+					// The floor line moved with the fresh PL1, so the button that is
+					// gated on the same value has to follow it.
+					w.syncFanResetSensitivity()
 				}
 			})
 		}()
@@ -865,7 +1007,7 @@ func (w *Window) buildCustomFocusList() {
 			widget: w.tdpBasicScale, row: 1, col: 0,
 			section:  "tdp",
 			editable: true,
-			onLeft: oL, onRight: oR,
+			onLeft:   oL, onRight: oR,
 			getValue: gV, setValue: sV,
 			isVisible: func() bool { return w.tdpBasicScale.IsVisible() },
 		})
@@ -889,7 +1031,7 @@ func (w *Window) buildCustomFocusList() {
 			section:   "tdp",
 			editable:  true,
 			isVisible: advVis,
-			onLeft: oL, onRight: oR,
+			onLeft:    oL, onRight: oR,
 			getValue: gV, setValue: sV,
 		})
 	}
@@ -897,7 +1039,7 @@ func (w *Window) buildCustomFocusList() {
 	// Row 6: fan curve (editable with custom behavior).
 	if w.fanCurve != nil {
 		items = append(items, focusItem{
-			widget:  w.fanCurve.area, row: 6, col: 0,
+			widget: w.fanCurve.area, row: 6, col: 0,
 			section: "fan",
 			// Fan curve is navigable but not editable via gamepad in this first pass.
 			// Touch/mouse drag handles interaction.
@@ -954,5 +1096,6 @@ func (w *Window) buildCustomFocusList() {
 		onActivate: func() { w.resetFanBtn.Activate() },
 	})
 
+	items = append(items, w.errBarFocusItem())
 	w.customFocusItems = items
 }

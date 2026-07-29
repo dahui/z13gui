@@ -1,3 +1,6 @@
+/* Copyright 2026 Jeff Hagadorn
+   SPDX-License-Identifier: Apache-2.0 */
+
 /* layout.css — structural rules only. No colors. Not user-overridable.
    This file is embedded in the binary and always loaded at PRIORITY_APPLICATION.
    All element-level rules are scoped to .drawer to avoid affecting child windows
@@ -33,6 +36,26 @@
     font-weight: bold;
     margin-top: 4px;
     margin-bottom: 4px;
+}
+
+/* Error bar — sits between the view stack and the bottom bar, hidden until an
+   operation fails. Wraps rather than truncating: daemon messages name the sysfs
+   path or the exact constraint that was violated, which is the useful part. */
+.error-bar {
+    padding: 6px 8px;
+    margin: 0 8px 4px 8px;
+    border-radius: 6px;
+}
+
+.error-bar .error-text {
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.error-bar .error-dismiss {
+    min-height: 20px;
+    min-width: 20px;
+    padding: 0;
 }
 
 /* Fan curve drawing area */
@@ -145,7 +168,16 @@
     border-radius: 6px;
 }
 
-/* Accent label in theme picker popover */
+/* Back button in the custom, theme and colour views. Sized here as well as in
+   the gamescope scaled CSS so the two backends agree at scale 1. */
+.view-back-btn {
+    min-width: 32px;
+    min-height: 32px;
+    padding: 4px;
+    border-radius: 6px;
+}
+
+/* Accent label in the theme picker */
 .accent-label {
     font-size: 9px;
     font-weight: bold;
@@ -168,11 +200,6 @@
 .bottom-bar switch {
     min-height: 20px;
     min-width: 36px;
-}
-
-/* Scrolled container inside theme picker popover */
-popover.z13-popover scrolledwindow {
-    background: transparent;
 }
 
 /* Gamepad focus indicator — outline on the currently focused widget */

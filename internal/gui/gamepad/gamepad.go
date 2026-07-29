@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 // Package gamepad reads Linux evdev gamepad events and dispatches normalized
 // actions to the GUI. It scans /dev/input/event* for gamepad devices, reads
 // events in background goroutines, and translates them into Action values.
@@ -24,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dahui/z13gui/internal/keyrepeat"
 	evdev "github.com/holoplot/go-evdev"
 )
 
@@ -49,9 +53,9 @@ type Handler func(Action)
 type deviceClass int
 
 const (
-	deviceIgnore  deviceClass = iota // not gamepad-related; skip
-	deviceGamepad                    // full gamepad: read events + EVIOCGRAB
-	deviceGrabOnly                   // related device (e.g. PS touchpad): EVIOCGRAB only
+	deviceIgnore   deviceClass = iota // not gamepad-related; skip
+	deviceGamepad                     // full gamepad: read events + EVIOCGRAB
+	deviceGrabOnly                    // related device (e.g. PS touchpad): EVIOCGRAB only
 )
 
 // gamepadButtons are evdev button codes that identify a device as a gamepad.
@@ -82,6 +86,7 @@ type Reader struct {
 	devices  map[string]*evdev.InputDevice // gamepad devices: read events + grab
 	grabOnly map[string]*evdev.InputDevice // related devices: grab only (e.g. PS touchpad)
 	grabbed  bool                          // true while overlay is visible (exclusive grab)
+	grabSeq  uint64                        // highest SetGrabbed seq applied; rejects stale requests
 	stop     chan struct{}
 }
 
@@ -123,48 +128,53 @@ func (r *Reader) Stop() {
 	}
 }
 
-// GrabAll acquires exclusive access (EVIOCGRAB) on all tracked devices
-// so events are not delivered to other readers (e.g. the background game).
-// New devices discovered while grabbed are auto-grabbed in tryOpen.
-func (r *Reader) GrabAll() {
+// SetGrabbed acquires (grab=true) or releases (grab=false) exclusive access
+// (EVIOCGRAB) on every tracked device, so events either reach only the drawer or
+// go back to the desktop and any running game. New devices discovered while
+// grabbed are auto-grabbed in tryOpen.
+//
+// seq orders requests that overlap. Both callers run on their own goroutine —
+// the socket work must not block the GTK thread — and the gamescope hide path
+// delays its release so the dismiss button's release event is consumed first, so
+// they can and do arrive out of order. Applying a stale one is not cosmetic: an
+// ungrab landing after a re-show hands the game the same D-pad presses being used
+// to navigate the drawer, and a grab landing after a hide leaves every controller
+// exclusively grabbed with nothing on screen — no input reaches the game at all
+// until the next full open/close cycle.
+//
+// The caller supplies a seq that increases with each show/hide from the GTK
+// thread, which is the only place that knows the intended order.
+func (r *Reader) SetGrabbed(seq uint64, grab bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.grabbed = true
-	for path, dev := range r.devices {
-		if err := dev.Grab(); err != nil {
-			slog.Warn("gamepad: grab failed", "path", path, "err", err)
-		} else {
-			slog.Info("gamepad: grabbed", "path", path)
-		}
+	if seq <= r.grabSeq {
+		slog.Debug("gamepad: ignoring superseded grab request",
+			"seq", seq, "current", r.grabSeq, "grab", grab)
+		return
 	}
-	for path, dev := range r.grabOnly {
-		if err := dev.Grab(); err != nil {
-			slog.Warn("gamepad: grab failed", "path", path, "err", err)
-		} else {
-			slog.Info("gamepad: grabbed", "path", path)
-		}
-	}
-}
+	r.grabSeq = seq
+	r.grabbed = grab
 
-// UngrabAll releases exclusive access on all tracked devices,
-// allowing the background game to receive events again.
-func (r *Reader) UngrabAll() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.grabbed = false
-	for path, dev := range r.devices {
-		if err := dev.Ungrab(); err != nil {
-			slog.Warn("gamepad: ungrab failed", "path", path, "err", err)
+	apply := func(path string, dev *evdev.InputDevice) {
+		var err error
+		failed, done := "ungrab failed", "ungrabbed"
+		if grab {
+			err = dev.Grab()
+			failed, done = "grab failed", "grabbed"
 		} else {
-			slog.Info("gamepad: ungrabbed", "path", path)
+			err = dev.Ungrab()
 		}
+		if err != nil {
+			slog.Warn("gamepad: "+failed, "path", path, "err", err)
+			return
+		}
+		slog.Info("gamepad: "+done, "path", path)
+	}
+	for path, dev := range r.devices {
+		apply(path, dev)
 	}
 	for path, dev := range r.grabOnly {
-		if err := dev.Ungrab(); err != nil {
-			slog.Warn("gamepad: ungrab failed", "path", path, "err", err)
-		} else {
-			slog.Info("gamepad: ungrabbed", "path", path)
-		}
+		apply(path, dev)
 	}
 }
 
@@ -300,35 +310,46 @@ func (r *Reader) readLoop(path string, dev *evdev.InputDevice) {
 		slog.Info("gamepad: disconnected", "path", path)
 	}()
 
+	// Auto-repeat for held directions. keyrepeat owns the "who holds the repeat"
+	// bookkeeping (tested there); this keeps only the timer.
 	var repeatMu sync.Mutex
 	var repeatTimer *time.Timer
+	var repeat keyrepeat.Tracker[Action]
 
-	stopRepeat := func() {
+	// stopRepeat cancels the repeat. With no arguments it stops whatever is
+	// active; given actions it stops only if the repeat belongs to one of them,
+	// so releasing one held direction leaves another still held repeating.
+	stopRepeat := func(only ...Action) {
 		repeatMu.Lock()
-		if repeatTimer != nil {
+		defer repeatMu.Unlock()
+		if repeat.Stop(only...) && repeatTimer != nil {
 			repeatTimer.Stop()
 			repeatTimer = nil
 		}
-		repeatMu.Unlock()
 	}
 	defer stopRepeat()
 
 	startRepeat := func(a Action) {
 		repeatMu.Lock()
+		defer repeatMu.Unlock()
 		if repeatTimer != nil {
 			repeatTimer.Stop()
 		}
+		// gen retires any callback already in flight. Without it the previous
+		// direction's timer — which has fired and is waiting on this lock — re-armed
+		// itself and overwrote this timer, so the old direction repeated forever
+		// while the new one never started.
+		gen := repeat.Start(a)
 		var tick func()
 		tick = func() {
 			r.emit(a)
 			repeatMu.Lock()
-			if repeatTimer != nil {
+			if repeat.ReArm(gen) {
 				repeatTimer = time.AfterFunc(repeatInterval, tick)
 			}
 			repeatMu.Unlock()
 		}
 		repeatTimer = time.AfterFunc(repeatInitial, tick)
-		repeatMu.Unlock()
 	}
 
 	for {
@@ -356,12 +377,17 @@ func (r *Reader) readLoop(path string, dev *evdev.InputDevice) {
 			case 0: // key up
 				if a, ok := buttonToAction(ev.Code); ok {
 					if isDirectional(a) {
-						stopRepeat()
+						// Only this direction: a button-style D-pad reports each
+						// direction separately, so an unqualified stop here cancelled
+						// a different direction the user was still holding.
+						stopRepeat(a)
 					}
 				}
 			}
 
 		case evdev.EV_ABS:
+			// A hat axis returning to centre says nothing about the other axis, so
+			// each centre event stops only the two directions on its own axis.
 			switch ev.Code {
 			case evdev.ABS_HAT0Y:
 				switch {
@@ -372,7 +398,7 @@ func (r *Reader) readLoop(path string, dev *evdev.InputDevice) {
 					r.emit(ActionDown)
 					startRepeat(ActionDown)
 				default:
-					stopRepeat()
+					stopRepeat(ActionUp, ActionDown)
 				}
 			case evdev.ABS_HAT0X:
 				switch {
@@ -383,7 +409,7 @@ func (r *Reader) readLoop(path string, dev *evdev.InputDevice) {
 					r.emit(ActionRight)
 					startRepeat(ActionRight)
 				default:
-					stopRepeat()
+					stopRepeat(ActionLeft, ActionRight)
 				}
 			}
 		}

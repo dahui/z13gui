@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 package gui
 
 import "github.com/diamondburned/gotk4/pkg/gtk/v4"
@@ -23,4 +26,12 @@ type Backend interface {
 
 	// Hide hides the drawer (animation, atom toggle, etc).
 	Hide()
+
+	// Scale returns the factor the drawer's CSS pixel sizes are multiplied by.
+	// Layer-shell returns 1.0 — GTK handles scaling there. Gamescope scales its
+	// own CSS because GDK_SCALE would be applied twice, and anything drawn
+	// directly rather than styled has to apply the same factor by hand or it
+	// stays at its 1x size while everything around it grows. Valid after
+	// Configure has realized the window.
+	Scale() float64
 }

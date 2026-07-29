@@ -1,3 +1,6 @@
+// Copyright 2026 Jeff Hagadorn
+// SPDX-License-Identifier: Apache-2.0
+
 package theme
 
 import "testing"
@@ -22,7 +25,8 @@ func TestBuiltinsAllColorsSet(t *testing.T) {
 	for _, b := range Builtins {
 		c := b.Colors
 		if c.Accent == "" || c.Background == "" || c.Surface == "" ||
-			c.SurfaceAlt == "" || c.Text == "" || c.TextDim == "" || c.Border == "" {
+			c.SurfaceAlt == "" || c.Text == "" || c.TextDim == "" || c.Border == "" ||
+			c.Error == "" {
 			t.Errorf("theme %q has empty color fields", b.ID)
 		}
 	}
@@ -116,6 +120,7 @@ func TestDefaultColorsValid(t *testing.T) {
 		{"Text", c.Text},
 		{"TextDim", c.TextDim},
 		{"Border", c.Border},
+		{"Error", c.Error},
 	} {
 		if !IsHexColor(pair.val) {
 			t.Errorf("DefaultColors.%s = %q is not a valid hex color", pair.name, pair.val)
