@@ -14,7 +14,11 @@
      @z13-text        — primary text
      @z13-text-dim    — secondary/label text
      @z13-border      — window border and separator color
-     @z13-radius      — window corner radius (requires GTK 4.12+)
+     @z13-error       — error bar text and border, high-TDP warning text
+
+   Every one of those is defined below, so this file works as a standalone
+   theme.css. That matters: theme.css is loaded verbatim, unlike theme.toml,
+   whose values are substituted into a copy of this file at startup.
 
    All element-level rules are scoped to .drawer (or window.z13-drawer-window).
 
@@ -28,6 +32,7 @@
 @define-color z13-text        #e0e0e0;
 @define-color z13-text-dim    #888888;
 @define-color z13-border      #444444;
+@define-color z13-error       #ff4444;
 
 /* Window — transparent background so border-radius from .drawer is visible. */
 window.z13-drawer-window {

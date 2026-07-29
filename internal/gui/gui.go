@@ -527,6 +527,17 @@ func (w *Window) loadCSS() {
 		if err != nil {
 			slog.Warn("failed to read custom theme CSS, using default", "path", cssPath, "err", err)
 		} else {
+			// theme.css is loaded verbatim, so a token it references without
+			// defining is simply undefined and GTK drops every rule using it —
+			// silently, as a styling gap rather than an error. Name the tokens
+			// instead of leaving the user to guess why part of the drawer is
+			// unstyled. Not fatal: the rest of the sheet still applies.
+			if missing := theme.UndefinedColorTokens(string(data)); len(missing) > 0 {
+				slog.Warn("custom theme CSS references colors it does not define; "+
+					"rules using them will be ignored — add @define-color lines or "+
+					"start from `z13gui --print-theme`",
+					"path", cssPath, "undefined", missing)
+			}
 			w.themeProvider.LoadFromString(string(data))
 			slog.Info("theme loaded", "source", "custom-css", "path", cssPath)
 			loaded = true
