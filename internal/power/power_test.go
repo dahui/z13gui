@@ -588,3 +588,117 @@ func assertCurveValid(t *testing.T, l Limits, c Curve, minPWM int) {
 		}
 	}
 }
+
+// assertLimitsUsable states what the rest of the drawer assumes about a Limits
+// value: the TDP bounds are ordered, the temperature axis is wide enough for a
+// curve, and the fan floor is a real PWM value. Anything violating these produces
+// either a curve the daemon rejects or NaN coordinates in the editor.
+func assertLimitsUsable(t *testing.T, l Limits) {
+	t.Helper()
+	if l.TDPMin >= l.TDPMaxSafe {
+		t.Errorf("TDPMin %d not below TDPMaxSafe %d", l.TDPMin, l.TDPMaxSafe)
+	}
+	if l.TDPMaxSafe > l.TDPMaxForced {
+		t.Errorf("TDPMaxSafe %d above TDPMaxForced %d", l.TDPMaxSafe, l.TDPMaxForced)
+	}
+	if got := l.TempMax - l.TempMin; got < CurvePoints-1 {
+		t.Errorf("temperature range %d too narrow for %d points", got, CurvePoints)
+	}
+	if l.HighTDPMinPWM < PWMMin || l.HighTDPMinPWM > PWMMax {
+		t.Errorf("HighTDPMinPWM %d outside [%d,%d]", l.HighTDPMinPWM, PWMMin, PWMMax)
+	}
+	if l.BasicSliderMax() > l.TDPMaxForced {
+		t.Errorf("BasicSliderMax %d above TDPMaxForced %d", l.BasicSliderMax(), l.TDPMaxForced)
+	}
+	if len(l.StockProfilePPT) == 0 {
+		t.Error("StockProfilePPT is empty")
+	}
+}
+
+// TestSanitizedRepairsInconsistentLimits covers the values a daemon-served
+// device description could carry that a zero check cannot catch. This is the path
+// multi-device support opens: today Limits is a compiled-in constant, tomorrow it
+// arrives over a socket from a daemon of unknown version.
+func TestSanitizedRepairsInconsistentLimits(t *testing.T) {
+	d := DefaultLimits()
+
+	tests := []struct {
+		name string
+		in   Limits
+	}{
+		{"zero value", Limits{}},
+		{"temp axis inverted", Limits{TempMin: 90, TempMax: 40}},
+		{"temp axis collapsed", Limits{TempMin: 50, TempMax: 50}},
+		{"temp axis too narrow for the curve", Limits{TempMin: 50, TempMax: 55}},
+		{"temp axis exactly one degree short", Limits{TempMin: 40, TempMax: 40 + CurvePoints - 2}},
+		{"safe max below the minimum", Limits{TDPMin: 60, TDPMaxSafe: 30, TDPMaxForced: 90}},
+		{"safe max above the forced max", Limits{TDPMin: 5, TDPMaxSafe: 95, TDPMaxForced: 90}},
+		{"min equals safe max", Limits{TDPMin: 50, TDPMaxSafe: 50, TDPMaxForced: 90}},
+		{"fan floor above the hwmon maximum", Limits{HighTDPMinPWM: 999}},
+		{"fan floor negative", Limits{HighTDPMinPWM: -5}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.in.Sanitized()
+			assertLimitsUsable(t, got)
+			// Whatever it repaired, the placeholder curve must still be valid — the
+			// editor draws it before the daemon reports anything.
+			assertCurveValid(t, got, got.DefaultCurve(), PWMMin)
+		})
+	}
+
+	// A device with no fan floor keeps that: zero is legitimate there, and the
+	// repair above must not mistake it for a missing value.
+	t.Run("zero fan floor is preserved", func(t *testing.T) {
+		if got := (Limits{HighTDPMinPWM: 0}).Sanitized(); got.HighTDPMinPWM != 0 {
+			t.Errorf("HighTDPMinPWM = %d, want 0 preserved", got.HighTDPMinPWM)
+		}
+	})
+
+	// A consistent description must pass through untouched, so the repair cannot
+	// quietly overwrite a legitimate device with the Z13's numbers.
+	t.Run("consistent limits are untouched", func(t *testing.T) {
+		for _, l := range []Limits{d, otherDevice()} {
+			got := l.Sanitized()
+			if got.TDPMin != l.TDPMin || got.TDPMaxSafe != l.TDPMaxSafe ||
+				got.TDPMaxForced != l.TDPMaxForced ||
+				got.TempMin != l.TempMin || got.TempMax != l.TempMax ||
+				got.HighTDPMinPWM != l.HighTDPMinPWM {
+				t.Errorf("%s: Sanitized altered a consistent value: %+v -> %+v", l.Model, l, got)
+			}
+		}
+	})
+}
+
+// TestSanitizedIsIdempotent — a repaired value must not repair further, or the
+// result would depend on how many times it had been through.
+func TestSanitizedIsIdempotent(t *testing.T) {
+	for _, in := range []Limits{{}, {TempMin: 50, TempMax: 50}, {TDPMin: 60, TDPMaxSafe: 30}} {
+		once := in.Sanitized()
+		twice := once.Sanitized()
+		if once.TDPMin != twice.TDPMin || once.TDPMaxSafe != twice.TDPMaxSafe ||
+			once.TDPMaxForced != twice.TDPMaxForced ||
+			once.TempMin != twice.TempMin || once.TempMax != twice.TempMax ||
+			once.HighTDPMinPWM != twice.HighTDPMinPWM {
+			t.Errorf("not idempotent: %+v -> %+v -> %+v", in, once, twice)
+		}
+	}
+}
+
+// TestEnforceCurveSurvivesASanitizedNarrowAxis is the failure this repair
+// prevents, stated end to end: take the narrowest axis Sanitized will accept,
+// push a point to each extreme, and require a valid curve every time.
+func TestEnforceCurveOnNarrowestAcceptedAxis(t *testing.T) {
+	l := Limits{TempMin: 40, TempMax: 40 + CurvePoints - 1}.Sanitized()
+	assertLimitsUsable(t, l)
+
+	for idx := 0; idx < CurvePoints; idx++ {
+		for _, temp := range []int{-100, 0, l.TempMin, l.TempMax, 10000} {
+			c := l.DefaultCurve()
+			c[idx].Temp = temp
+			l.EnforceCurve(&c, idx, PWMMin)
+			assertCurveValid(t, l, c, PWMMin)
+		}
+	}
+}

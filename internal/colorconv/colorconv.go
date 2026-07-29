@@ -85,6 +85,26 @@ func HexToHSL(hex string) (h, s, l float64, ok bool) {
 	return h * 60, s * 100, l * 100, true
 }
 
+// RGB converts a hex colour to the 0..1 component floats Cairo takes, so the fan
+// curve chart can be drawn in the active theme's colours instead of hardcoded
+// ones. ok is false when hex is not a colour, in which case the caller must fall
+// back rather than draw the zero value — which is black, and invisible against a
+// dark theme's background.
+func RGB(hex string) (r, g, b float64, ok bool) {
+	norm, ok := Normalize(hex)
+	if !ok {
+		return 0, 0, 0, false
+	}
+	v, err := strconv.ParseUint(norm, 16, 32)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	return float64((v >> 16) & 0xFF) / 255,
+		float64((v >> 8) & 0xFF) / 255,
+		float64(v & 0xFF) / 255,
+		true
+}
+
 // HSLToHex converts HSL components to canonical uppercase RRGGBB.
 // H is taken modulo 360; S and L are clamped to [0,100], so slider values can be
 // passed straight through.

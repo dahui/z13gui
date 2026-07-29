@@ -67,8 +67,10 @@ internal/theme/
   config.go                     Config persistence (selected theme/accent)
   *_test.go                     Theme parsing, CSS generation, and built-in completeness tests
 internal/power/                 Limits value: TDP/fan bounds + rules (mirrors z13ctl internal/cli)
+internal/daemon/                Err(handled, err): collapses an api result pair into one error
 internal/focusgrid/             Gamepad focus navigation: row/col/section index math
-internal/colorconv/             hex <-> HSL conversion and colour validation
+internal/keyrepeat/             Tracker: which held direction owns the gamepad auto-repeat
+internal/colorconv/             hex <-> HSL/RGB conversion and colour validation
 internal/lighting/              RGB mode resolution, per-mode controls, defaults
 internal/uiscale/               Gamescope UI scale factor (cannot live in the cgo package)
 internal/startup/               CLI arg scanning + split-level slog handler
@@ -122,10 +124,28 @@ contrib/
 - **Error surface** (`errbar.go`): every daemon call reports failures through
   `w.reportError(op, err)` and clears on success with `clearError()`/`clearErrorAsync()`.
   The bar is appended to `outer` between `viewStack` and the bottom bar, so one instance
-  covers all four views in both backends. **Never drop a daemon error into `slog` alone** —
+  covers all four views in both backends. Its dismiss button is in every view's focus
+  grid via `errBarFocusItem()` at `errBarRow` — without that a controller cannot
+  dismiss an error at all. `reportError` drops the message when the drawer is already
+  closed, so a call still in flight at close does not leave the bar up for the next
+  open; the journal still has it. **Never drop a daemon error into `slog` alone** —
   that is what made z13ctl issue #14 look like a dead button for weeks. `reportError` is
   safe from any goroutine (it marshals via `glib.IdleAdd`) and logs internally, so call
   sites should not also `slog.Warn`.
+- **`handled == false` means the daemon is not running, and it is not an error.**
+  Every `api.Send*` returns `(handled bool, err error)`; when the socket dial fails
+  it returns `handled=false, err=nil`, because nothing was sent. **Never test `err`
+  alone** — wrap every call in `daemon.Err(api.SendX(...))`, which takes the result
+  pair directly so a site cannot read one and forget the other. All thirteen call
+  sites used to discard `handled`, so with the daemon stopped every operation took
+  its success path: `Save TDP` cleared the error bar, logged "custom TDP saved" and
+  left the typed values on screen. That is z13ctl issue #14's dead-button failure
+  rebuilt one layer up, and it defeated the error bar entirely.
+  `internal/daemon`'s contract test dials a temp `XDG_RUNTIME_DIR` to pin the api
+  convention rather than trusting its doc comment.
+  - The telemetry poll is the one deliberate exception, and says so in a comment:
+    it is a background poll, and reporting it every second would overwrite
+    whatever error the user was reading.
 - **Daemon calls must not run on the GTK thread**: `api` commands carry a 10s deadline
   (`commandTimeout`, api v1.1.7), so an inline call freezes the drawer for up to 10s
   against a wedged daemon. Read widget values on the main thread, then do the socket
@@ -145,6 +165,19 @@ contrib/
     main thread into plain data, then do the socket call in the goroutine — see
     `readTdpRequest`/`tdpRequest.send` in `tdp.go` and `sendApply` in `sync.go`.
     Come back to the main thread with `glib.IdleAdd`.
+  - **`Window.visible` is an `atomic.Bool`, and it is the only `Window` field any
+    goroutine may touch.** The gamepad reader gates every event on it, so a plain
+    bool there is a data race — and because `internal/gui` is excluded from
+    `go test -race`, nothing would ever report it. Anything else a goroutine needs
+    must be passed to it as plain data, not read off `Window`.
+- **Ordering matters for anything a goroutine applies to the outside world.**
+  `show`/`hide` issue their gamepad grab and release from separate goroutines, so
+  the two race: a grab landing after a hide leaves every controller exclusively
+  grabbed with nothing on screen and no input reaching the game, and a release
+  landing after a re-show (easy inside the gamescope path's deliberate 200ms delay)
+  hands the game the same D-pad presses navigating the drawer. `Window.grabGen` is
+  incremented on the GTK thread and passed to `gamepad.Reader.SetGrabbed(seq, grab)`,
+  which drops superseded requests. Add a sequence to any similar pair.
 - **Device limits are a value, not constants.** `power.Limits` holds the TDP range,
   fan floor, temperature axis and stock PPT table; `Window.limits` is initialised to
   `power.DefaultLimits()` (the Z13's values). **No TDP or fan bound may be hardcoded
@@ -156,8 +189,16 @@ contrib/
     `TDPMaxSafe - 5`, not a literal 70, because 70 is meaningless on a device whose
     safe max is 54.
   - `Sanitized()` replaces zero fields with defaults, for the day a daemon older
-    than the client omits one. `HighTDPMinPWM` is exempt — 0 legitimately means "no
-    fan floor on this device".
+    than the client omits one, **and enforces the ordering/width invariants** that
+    a zero check cannot see: `TDPMin < TDPMaxSafe <= TDPMaxForced`, and a
+    temperature axis at least `CurvePoints-1` wide. Each group falls back whole,
+    because an inconsistent triple does not say which member is wrong. Without the
+    width check a narrow axis makes `EnforceCurve` emit points below `TempMin` that
+    the daemon rejects, and `TempMin == TempMax` divides by zero in the editor's
+    coordinate mapping. The invariant was asserted in the tests but not enforced,
+    so it held only for limits compiled in — exactly what breaks when the daemon
+    starts serving them. `HighTDPMinPWM` is exempt from the zero check — 0
+    legitimately means "no fan floor on this device" — but is clamped to `PWMMax`.
   - `power.Curve` is a fixed `[8]` array. If a device ever needs a different point
     count it becomes a slice and the compile-time length guarantee is lost.
 - **High-TDP fan floor**: while sustained PL1 exceeds 75W the daemon rejects any fan
@@ -190,6 +231,15 @@ contrib/
   out of the struct makes it unreachable from the main thread and removes any chance of
   an unsynchronized read. Do not promote it to a field — reading it from `show()`/
   `hide()` would be a data race, and `internal/gui` is not covered by `go test -race`.
+- **Anything painted rather than styled must apply the scale and theme itself.**
+  The fan curve chart is Cairo, so it reads neither the `@z13-*` tokens nor the
+  gamescope CSS scaling. `Backend.Scale()` returns 1.0 on layer-shell and the
+  resolution factor under gamescope; `Window.colors` holds the active palette
+  alongside the CSS built from it. Every dimension in `fanCurveEditor.draw` and
+  `hitTest` multiplies by `fc.scale()` — `.fan-curve-area` grew with resolution
+  while the 6px points and 20px grab radius stayed at 1x, so the drag targets got
+  harder to hit the larger the output. `applyTheme`/`applyCustomAccent` call
+  `redrawFanCurve()`, since swapping the CSS provider does not repaint Cairo.
 - **CSS architecture**:
   - `layout.css` → `STYLE_PROVIDER_PRIORITY_APPLICATION` (structural, not overridable)
   - `theme-default.css` → `STYLE_PROVIDER_PRIORITY_USER` (colors, user-overridable)

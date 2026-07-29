@@ -58,7 +58,30 @@ func (w *Window) buildErrorBar() *gtk.Box {
 	bar.Append(dismiss)
 
 	w.errBar = bar
+	w.errDismissBtn = dismiss
 	return bar
+}
+
+// errBarRow places the error bar after every other row in every view's focus
+// grid. The bar is appended outside the view stack, so it has no natural row
+// number shared with the view in front of it; a value beyond any real row keeps
+// it last wherever it appears.
+const errBarRow = 10000
+
+// errBarFocusItem returns the gamepad entry for the dismiss button, for appending
+// to each view's focus list.
+//
+// Without it a controller could not dismiss an error at all — the only ways out
+// were to close the drawer or to complete an operation successfully, which is
+// exactly what a user staring at a failure is unsure how to do. It is only
+// navigable while the bar is showing.
+func (w *Window) errBarFocusItem() focusItem {
+	return focusItem{
+		widget: w.errDismissBtn, row: errBarRow, col: 0,
+		section:    "error",
+		isVisible:  func() bool { return w.errBar != nil && w.errBar.IsVisible() },
+		onActivate: func() { w.clearError() },
+	}
 }
 
 // reportError shows err in the error bar and logs it. Safe to call from any
@@ -75,6 +98,14 @@ func (w *Window) reportError(op string, err error) {
 	msg := op + ": " + err.Error()
 	glib.IdleAdd(func() {
 		if w.errBar == nil || w.errLabel == nil {
+			return
+		}
+		// A call still in flight when the drawer closes lands here afterwards, and
+		// showing the bar then means it is already up the next time the drawer
+		// opens — the stale failure hide()'s clearError exists to prevent. The
+		// journal still has it.
+		if !w.visible.Load() {
+			slog.Debug("error suppressed: drawer already closed", "op", op)
 			return
 		}
 		// Most recent error wins; the bar shows one message at a time.

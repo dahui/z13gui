@@ -210,6 +210,16 @@ func (b *Backend) WrapContent(drawer gtk.Widgetter) gtk.Widgetter {
 	return wrapper
 }
 
+// Scale returns the resolution-derived CSS scale factor. Anything the drawer
+// paints itself (the fan curve chart) must apply this too — scaledCSS only
+// reaches styled widget properties.
+func (b *Backend) Scale() float64 {
+	if b.scale <= 0 {
+		return 1.0 // realize has not run yet
+	}
+	return b.scale
+}
+
 // Show makes the overlay visible by setting full opacity and captures input
 // via STEAM_INPUT_FOCUS atom and an X11 keyboard grab. No pointer grab is
 // used — XGrabPointer's core event mask interferes with XI2 touch delivery,

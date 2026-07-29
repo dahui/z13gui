@@ -239,6 +239,9 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 		}
 		btn.ConnectToggled(func() {
 			if btn.Active() {
+				// Selecting the theme itself means its default accent, so no dot is
+				// the active one. A dot click re-marks itself afterwards.
+				w.setActiveAccentDot(nil)
 				w.applyTheme(id, "")
 			}
 		})
@@ -264,6 +267,7 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 		customBtn.SetActive(true)
 		customBtn.ConnectToggled(func() {
 			if customBtn.Active() {
+				w.setActiveAccentDot(nil)
 				w.applyCustomAccent("")
 			}
 		})
@@ -278,6 +282,26 @@ func (w *Window) appendThemeChoices(box *gtk.Box) {
 			func(ac theme.Accent) { w.applyCustomAccent(ac.ID) },
 		)
 		w.themeDots = append(w.themeDots, dots)
+	}
+}
+
+// setActiveAccentDot moves the .accent-dot-active marker to active, clearing it
+// from every other dot across every theme. Pass nil to clear it entirely.
+//
+// The marker used to be applied once, while the theme view was being built, from
+// the config file's saved accent — and the view is built lazily exactly once and
+// then kept. So picking a different accent left the marker where it was, and
+// switching theme left the previous theme's dot marked. Nothing showed which
+// accent was actually in force.
+func (w *Window) setActiveAccentDot(active *gtk.Button) {
+	for _, row := range w.themeDots {
+		for _, dot := range row {
+			if dot != nil && dot == active {
+				dot.AddCSSClass("accent-dot-active")
+			} else if dot != nil {
+				dot.RemoveCSSClass("accent-dot-active")
+			}
+		}
 	}
 }
 
@@ -318,7 +342,12 @@ func (w *Window) appendAccentDots(box *gtk.Box, accents []theme.Accent, isActive
 		provider.LoadFromString("button.color-preset { background: " + ac.Hex + "; }")
 		dot.StyleContext().AddProvider(provider, gtk.STYLE_PROVIDER_PRIORITY_USER+20) //nolint:staticcheck // per-widget dynamic color; no style-class alternative for unique hex backgrounds
 		dot.SetTooltipText(ac.Name)
-		dot.ConnectClicked(func() { onClick(ac) })
+		dot.ConnectClicked(func() {
+			// onClick first: it may activate this theme's radio button, whose
+			// toggled handler clears every dot. Marking afterwards survives that.
+			onClick(ac)
+			w.setActiveAccentDot(dot)
+		})
 		dots = append(dots, dot)
 		row.Append(dot)
 	}
@@ -820,6 +849,7 @@ func (w *Window) buildMainFocusList() {
 		})
 	}
 
+	items = append(items, w.errBarFocusItem())
 	w.mainFocusItems = items
 }
 
@@ -861,6 +891,7 @@ func (w *Window) buildThemeFocusList() {
 		}
 	}
 
+	items = append(items, w.errBarFocusItem())
 	w.themeFocusItems = items
 }
 
@@ -899,5 +930,6 @@ func (w *Window) buildColorFocusList() {
 		})
 	}
 
+	items = append(items, w.errBarFocusItem())
 	w.colorFocusItems = items
 }

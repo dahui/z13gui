@@ -19,6 +19,11 @@ Single Go module (`github.com/dahui/z13gui`).
 | `internal/gui/fonts` | Embedded Inter font registration |
 | `internal/theme` | Color definitions, TOML parsing, CSS generation — pure Go |
 
+Decisions live in pure packages outside `internal/gui`; the GTK files read
+widgets, call out, and apply the answer. `internal/gui` cannot be compiled by the
+test tool at all, so anything left in there is unverifiable by construction —
+including `internal/gui/gamepad`, which needs no CGO but is excluded by path.
+
 ---
 
 ## Development setup
@@ -97,8 +102,11 @@ and should include tests for any changes to the pure-Go packages.
 - `internal/theme` — fully unit-testable; covers color parsing, CSS generation,
   config persistence, and all 78 built-in theme/accent combinations
 - `internal/power` — TDP limits and fan curve rules
+- `internal/daemon` — collapsing an api `(handled, err)` pair into one error, plus
+  a contract test pinning the api's "daemon not running" convention
 - `internal/focusgrid` — gamepad focus navigation index math
-- `internal/colorconv` — hex/HSL conversion and colour validation
+- `internal/keyrepeat` — which held direction owns the gamepad auto-repeat
+- `internal/colorconv` — hex/HSL/RGB conversion and colour validation
 - `internal/lighting` — RGB mode resolution and per-mode controls
 - `internal/uiscale` — gamescope UI scale factor
 - `internal/startup` — CLI argument scanning and log filtering

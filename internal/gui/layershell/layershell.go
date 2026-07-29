@@ -173,6 +173,10 @@ func (b *Backend) WrapContent(drawer gtk.Widgetter) gtk.Widgetter {
 	return drawer
 }
 
+// Scale is always 1.0: GTK applies the compositor's scale factor itself on
+// Wayland, so the drawer's CSS pixel values are already correct.
+func (b *Backend) Scale() float64 { return 1.0 }
+
 // Show starts the slide-in animation using a smoothstep easing curve.
 func (b *Backend) Show() {
 	slog.Debug("backend.Show", "startMargin", b.margin, "rightNeighbor", b.hasRightNeighbor())

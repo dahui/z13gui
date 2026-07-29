@@ -190,3 +190,69 @@ func TestHSLToHexClampsAndWraps(t *testing.T) {
 		t.Errorf("lightness -999 = %s, want %s (clamped to 0)", got, want)
 	}
 }
+
+func TestRGB(t *testing.T) {
+	tests := []struct {
+		hex     string
+		r, g, b float64
+		ok      bool
+	}{
+		{"FF0000", 1, 0, 0, true},
+		{"00FF00", 0, 1, 0, true},
+		{"0000FF", 0, 0, 1, true},
+		{"FFFFFF", 1, 1, 1, true},
+		{"000000", 0, 0, 0, true},
+		// Theme tokens arrive "#rrggbb" from theme.Colors, so the leading hash and
+		// lowercase digits both have to work — this is the form the fan curve reads.
+		{"#cc0000", 0.8, 0, 0, true},
+		{"#f38ba8", 243.0 / 255, 139.0 / 255, 168.0 / 255, true},
+		// Shorthand, same as Normalize accepts.
+		{"#f00", 1, 0, 0, true},
+		// Not colours: the caller must fall back, not draw black.
+		{"", 0, 0, 0, false},
+		{"nope", 0, 0, 0, false},
+		{"#12345", 0, 0, 0, false},
+		{"GGGGGG", 0, 0, 0, false},
+	}
+	const eps = 1e-9
+	for _, tt := range tests {
+		r, g, b, ok := RGB(tt.hex)
+		if ok != tt.ok {
+			t.Errorf("RGB(%q) ok = %v, want %v", tt.hex, ok, tt.ok)
+			continue
+		}
+		if math.Abs(r-tt.r) > eps || math.Abs(g-tt.g) > eps || math.Abs(b-tt.b) > eps {
+			t.Errorf("RGB(%q) = (%v, %v, %v), want (%v, %v, %v)",
+				tt.hex, r, g, b, tt.r, tt.g, tt.b)
+		}
+	}
+}
+
+// TestRGBComponentsInRange is the invariant Cairo depends on: SetSourceRGBA
+// silently clamps, so an out-of-range component would be a colour that is wrong
+// rather than an error anyone notices.
+func TestRGBComponentsInRange(t *testing.T) {
+	for v := 0; v <= 0xFFFFFF; v += 7919 { // prime stride, ~2100 samples
+		hex := fmt.Sprintf("%06X", v)
+		r, g, b, ok := RGB(hex)
+		if !ok {
+			t.Fatalf("RGB(%q) not ok", hex)
+		}
+		for name, c := range map[string]float64{"r": r, "g": g, "b": b} {
+			if c < 0 || c > 1 {
+				t.Fatalf("RGB(%q) %s = %v, outside [0,1]", hex, name, c)
+			}
+		}
+	}
+}
+
+// TestRGBMatchesEveryBuiltinThemeToken would be circular if it lived in the theme
+// package; here it just checks that the string form theme.Colors uses is one RGB
+// accepts, for every token the fan curve might read.
+func TestRGBAcceptsThemeTokenForm(t *testing.T) {
+	for _, hex := range []string{"#cc0000", "#1a1a1a", "#e0e0e0", "#888888", "#ff4444"} {
+		if _, _, _, ok := RGB(hex); !ok {
+			t.Errorf("RGB(%q) rejected a theme token", hex)
+		}
+	}
+}

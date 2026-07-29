@@ -132,6 +132,34 @@ func (l Limits) Sanitized() Limits {
 	if len(l.StockProfilePPT) == 0 {
 		l.StockProfilePPT = d.StockProfilePPT
 	}
+
+	// Ordering and width invariants, not just presence. A per-field default fixes
+	// a value the daemon never sent; these catch values it sent that cannot be
+	// true together, which a zero check cannot see.
+	//
+	// Each group falls back whole rather than nudging one field, because an
+	// inconsistent triple does not say which of its members is the wrong one.
+	if l.TDPMin >= l.TDPMaxSafe || l.TDPMaxSafe > l.TDPMaxForced {
+		l.TDPMin, l.TDPMaxSafe, l.TDPMaxForced = d.TDPMin, d.TDPMaxSafe, d.TDPMaxForced
+	}
+
+	// The temperature axis has to be wide enough for the curve's points to hold
+	// strictly increasing temperatures. Below that EnforceCurve cannot satisfy
+	// both monotonicity and the bounds, and emits points under TempMin that the
+	// daemon rejects; at TempMin == TempMax the editor's coordinate mapping
+	// divides by zero and every point lands on a NaN. The invariant was asserted
+	// in the tests but never enforced, so it held only for limits compiled in.
+	if l.TempMax-l.TempMin < CurvePoints-1 {
+		l.TempMin, l.TempMax = d.TempMin, d.TempMax
+	}
+
+	// A floor above the hwmon maximum would clamp every curve point to full speed.
+	if l.HighTDPMinPWM < PWMMin {
+		l.HighTDPMinPWM = PWMMin
+	}
+	if l.HighTDPMinPWM > PWMMax {
+		l.HighTDPMinPWM = PWMMax
+	}
 	return l
 }
 

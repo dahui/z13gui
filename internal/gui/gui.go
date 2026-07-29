@@ -9,9 +9,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/dahui/z13ctl/api"
+	"github.com/dahui/z13gui/internal/daemon"
 	"github.com/dahui/z13gui/internal/gui/fonts"
 	"github.com/dahui/z13gui/internal/gui/gamepad"
 	"github.com/dahui/z13gui/internal/gui/gamescope"
@@ -57,13 +59,31 @@ type Window struct {
 	gamescope bool        // true when running under gamescope (X11 overlay mode)
 	state     *api.State  // latest daemon state; nil until first successful fetch
 	tab       string      // active device tab: "keyboard" or "lightbar"
-	visible   bool        // true when the drawer is on-screen or animating in
+
+	// visible is true when the drawer is on-screen or animating in. Atomic
+	// because it is the one piece of Window state read off the GTK thread: the
+	// gamepad reader's goroutine gates every event on it. A plain bool there is a
+	// data race, and internal/gui is not covered by `go test -race`, so nothing
+	// would ever report it. Written only from show/hide on the GTK thread.
+	visible atomic.Bool
+
+	// grabGen orders the gamepad grab/release requests show and hide issue from
+	// their own goroutines. Incremented on the GTK thread, which is the only place
+	// that knows the intended order. See gamepad.Reader.SetGrabbed.
+	grabGen uint64
 
 	swatchProvider *gtk.CSSProvider // dynamic swatch background colors
 	themeProvider  *gtk.CSSProvider // current theme; replaced on applyTheme()
 
-	errBar   *gtk.Box   // error surface; hidden unless an operation failed
-	errLabel *gtk.Label // message shown in errBar
+	// colors is the active palette, kept alongside the CSS built from it because
+	// the fan curve chart is painted with Cairo rather than styled by CSS and so
+	// cannot read the @z13-* tokens. Without this the chart was the one part of
+	// the drawer the theme did not reach.
+	colors theme.Colors
+
+	errBar        *gtk.Box    // error surface; hidden unless an operation failed
+	errLabel      *gtk.Label  // message shown in errBar
+	errDismissBtn *gtk.Button // dismiss button; navigable in every view's focus grid
 
 	// limits is the device's power/thermal envelope, driving every TDP and fan
 	// curve bound in the custom view. Defaulted to the Z13's values; when z13ctl
@@ -117,6 +137,7 @@ type Window struct {
 	telemetryTempLabel *gtk.Label
 	telemetryFanLabel  *gtk.Label
 	telemetryGen       int
+	telemetryBusy      bool // a poll request is in flight; skip ticks until it lands
 	customFocusItems   []focusItem
 
 	syncing    bool        // true while syncState is updating widgets; suppresses sendApply
@@ -168,6 +189,7 @@ func New(app *gtk.Application) *Window {
 	w := &Window{
 		tab:         "keyboard",
 		limits:      power.DefaultLimits(),
+		colors:      theme.DefaultColors,
 		gamescope:   os.Getenv("GAMESCOPE_WAYLAND_DISPLAY") != "",
 		modeButtons: make(map[string]*gtk.Button),
 		speedBtns:   make(map[string]*gtk.Button),
@@ -185,7 +207,7 @@ func New(app *gtk.Application) *Window {
 		w.backend = layershell.New(w.win, w.gtkWin, drawerWidth)
 	}
 
-	w.backend.Configure(func() bool { return w.visible }, w.hide)
+	w.backend.Configure(w.visible.Load, w.hide)
 
 	if w.gamescope {
 		w.steamBlocker = gamepad.NewSteamInputBlocker()
@@ -212,7 +234,7 @@ func New(app *gtk.Application) *Window {
 	if os.Getenv("Z13GUI_NO_GAMEPAD") == "" {
 		w.gamepadReader = gamepad.New(
 			w.handleGamepadAction,
-			func() bool { return w.visible },
+			w.visible.Load,
 			func(f func()) { glib.IdleAdd(f) },
 		)
 		go w.gamepadReader.Run()
@@ -247,8 +269,8 @@ func New(app *gtk.Application) *Window {
 
 // Toggle shows or hides the drawer. Must be called from the GTK main thread.
 func (w *Window) Toggle() {
-	slog.Debug("toggle entered", "visible", w.visible)
-	if w.visible {
+	slog.Debug("toggle entered", "visible", w.visible.Load())
+	if w.visible.Load() {
 		slog.Info("toggle", "action", "hide")
 		w.hide()
 	} else {
@@ -256,17 +278,23 @@ func (w *Window) Toggle() {
 		w.show()
 		fetchStart := time.Now()
 		go func() {
-			ok, state, err := api.SendGetState()
-			slog.Debug("SendGetState returned", "ok", ok, "err", err, "elapsed", time.Since(fetchStart))
-			if ok && err == nil {
-				glib.IdleAdd(func() {
-					slog.Debug("syncState dispatched", "totalElapsed", time.Since(fetchStart))
-					w.state = state
-					w.syncState()
-				})
-			} else if err != nil {
+			ok, state, rawErr := api.SendGetState()
+			slog.Debug("SendGetState returned", "ok", ok, "err", rawErr, "elapsed", time.Since(fetchStart))
+			// A missing daemon arrives as ok=false with a nil error, so testing err
+			// alone opened the drawer on stale defaults with nothing to say. That is
+			// the worst moment to stay quiet: every control is about to lie.
+			if err := daemon.Err(ok, rawErr); err != nil {
 				w.reportError("Read daemon state", err)
+				return
 			}
+			if state == nil {
+				return
+			}
+			glib.IdleAdd(func() {
+				slog.Debug("syncState dispatched", "totalElapsed", time.Since(fetchStart))
+				w.state = state
+				w.syncState()
+			})
 		}()
 	}
 }
@@ -274,12 +302,30 @@ func (w *Window) Toggle() {
 // show delegates to the display backend.
 func (w *Window) show() {
 	slog.Debug("show called")
-	w.visible = true
+	w.visible.Store(true)
+	w.grabGen++
 	if w.gamepadReader != nil {
-		go w.gamepadReader.GrabAll()
+		gen := w.grabGen
+		go w.gamepadReader.SetGrabbed(gen, true)
 	}
+	// BlockSteam walks /proc twice (every comm, then every status) to find Steam
+	// and its children, which is far too much synchronous I/O to do before the
+	// animation starts. It only has to take effect before the user's first input,
+	// so it runs alongside the slide instead of in front of it.
 	if w.steamBlocker != nil {
-		w.steamPID = w.steamBlocker.BlockSteam()
+		blocker := w.steamBlocker
+		go func() {
+			pid := blocker.BlockSteam()
+			glib.IdleAdd(func() {
+				// A hide may have landed while /proc was being walked. Undo
+				// immediately rather than recording a PID nothing will release.
+				if !w.visible.Load() {
+					blocker.UnblockSteam(pid)
+					return
+				}
+				w.steamPID = pid
+			})
+		}()
 	}
 	w.backend.Show()
 	w.startTelemetryPolling()
@@ -288,10 +334,14 @@ func (w *Window) show() {
 // hide delegates to the display backend. Resets to main view so the drawer
 // always opens to the home screen.
 func (w *Window) hide() {
-	slog.Debug("hide called", "wasVisible", w.visible)
-	w.visible = false
+	slog.Debug("hide called", "wasVisible", w.visible.Load())
+	w.visible.Store(false)
+	w.grabGen++
+	gen := w.grabGen
 	// Delay unblock + ungrab so the dismiss button release is consumed before
-	// Steam resumes input processing.
+	// Steam resumes input processing. gen makes that delay safe: a show landing
+	// inside the 200ms window supersedes this release, which would otherwise hand
+	// the game the D-pad presses navigating the re-opened drawer.
 	if w.steamBlocker != nil && w.steamPID > 0 {
 		pid := w.steamPID
 		w.steamPID = 0
@@ -299,11 +349,11 @@ func (w *Window) hide() {
 			time.Sleep(200 * time.Millisecond)
 			w.steamBlocker.UnblockSteam(pid)
 			if w.gamepadReader != nil {
-				w.gamepadReader.UngrabAll()
+				w.gamepadReader.SetGrabbed(gen, false)
 			}
 		}()
 	} else if w.gamepadReader != nil {
-		go w.gamepadReader.UngrabAll()
+		go w.gamepadReader.SetGrabbed(gen, false)
 	}
 	w.hideGamepadFocus()
 	w.clearError()   // don't greet the next open with a stale failure
@@ -459,6 +509,7 @@ func (w *Window) loadCSS() {
 					}
 				}
 			}
+			w.colors = colors
 			w.themeProvider.LoadFromString(theme.BuildThemeCSS(colors, defaultThemeCSS))
 			slog.Info("theme loaded", "source", "custom-toml", "path", tomlPath)
 			loaded = true
@@ -484,6 +535,7 @@ func (w *Window) loadCSS() {
 				colors.Accent = hex
 			}
 		}
+		w.colors = colors
 		w.themeProvider.LoadFromString(theme.BuildThemeCSS(colors, defaultThemeCSS))
 		slog.Info("theme loaded", "source", "builtin", "theme", cfg.Theme, "accent", cfg.Accent)
 	}
@@ -510,9 +562,11 @@ func (w *Window) applyTheme(id, accentID string) {
 			colors.Accent = hex
 		}
 	}
+	w.colors = colors
 	w.themeProvider.LoadFromString(theme.BuildThemeCSS(colors, defaultThemeCSS))
 	gtk.StyleContextAddProviderForDisplay(display, w.themeProvider, gtk.STYLE_PROVIDER_PRIORITY_USER)
 	theme.SaveAppConfig(theme.AppConfig{Theme: id, Accent: accentID})
+	w.redrawFanCurve()
 	slog.Info("theme changed", "id", id, "accent", accentID)
 }
 
@@ -532,9 +586,26 @@ func (w *Window) applyCustomAccent(accentID string) {
 		gtk.StyleContextRemoveProviderForDisplay(display, w.themeProvider)
 	}
 	w.themeProvider = gtk.NewCSSProvider()
+	w.colors = colors
 	w.themeProvider.LoadFromString(theme.BuildThemeCSS(colors, defaultThemeCSS))
 	gtk.StyleContextAddProviderForDisplay(display, w.themeProvider, gtk.STYLE_PROVIDER_PRIORITY_USER)
-	theme.SaveAppConfig(theme.AppConfig{Accent: accentID})
+	// Change only the accent. Saving AppConfig{Accent: …} wrote an empty theme
+	// key, discarding the user's built-in theme choice — invisible while
+	// theme.toml exists, since it wins on load, and a silent reset to rog-dark the
+	// moment they remove it.
+	cfg := theme.LoadAppConfig()
+	cfg.Accent = accentID
+	theme.SaveAppConfig(cfg)
+	w.redrawFanCurve()
+}
+
+// redrawFanCurve repaints the fan curve chart after a theme change. It is drawn
+// with Cairo from w.colors rather than styled by CSS, so swapping the CSS
+// provider alone leaves it in the previous theme's colours.
+func (w *Window) redrawFanCurve() {
+	if w.fanCurve != nil {
+		w.fanCurve.area.QueueDraw()
+	}
 }
 
 // fileExists returns true if a file exists at the given path.

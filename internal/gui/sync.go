@@ -9,6 +9,7 @@ import (
 
 	"github.com/dahui/z13ctl/api"
 	"github.com/dahui/z13gui/internal/colorconv"
+	"github.com/dahui/z13gui/internal/daemon"
 	"github.com/dahui/z13gui/internal/lighting"
 	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
@@ -165,7 +166,7 @@ func (w *Window) sendApply() {
 		go func() {
 			slog.Debug("sendApply: calling daemon off", "device", device)
 			start := time.Now()
-			if _, err := api.SendOff(device); err != nil {
+			if err := daemon.Err(api.SendOff(device)); err != nil {
 				w.reportError("Turn off "+device+" lighting", err)
 				return
 			}
@@ -178,7 +179,7 @@ func (w *Window) sendApply() {
 	go func() {
 		slog.Debug("sendApply: calling daemon", "device", device, "mode", mode, "brightness", brightness)
 		start := time.Now()
-		if _, err := api.SendApply(device, color1, color2, mode, speed, brightness); err != nil {
+		if err := daemon.Err(api.SendApply(device, color1, color2, mode, speed, brightness)); err != nil {
 			w.reportError("Apply "+device+" lighting", err)
 			return
 		}
@@ -196,7 +197,7 @@ func (w *Window) sendProfileSet(prof string) {
 	go func() {
 		slog.Debug("sendProfileSet: calling daemon", "profile", prof)
 		start := time.Now()
-		if _, err := api.SendProfileSet(prof); err != nil {
+		if err := daemon.Err(api.SendProfileSet(prof)); err != nil {
 			w.reportError("Set "+prof+" profile", err)
 			return
 		}
@@ -219,7 +220,7 @@ func (w *Window) initBatteryDebounce(sc *gtk.Scale) {
 				go func() {
 					slog.Debug("sendBatteryLimitSet: calling daemon", "limit", val)
 					start := time.Now()
-					if _, err := api.SendBatteryLimitSet(val); err != nil {
+					if err := daemon.Err(api.SendBatteryLimitSet(val)); err != nil {
 						w.reportError("Set battery limit", err)
 						return
 					}
@@ -253,7 +254,7 @@ func (w *Window) sendOverdriveSet(value int) {
 	go func() {
 		slog.Debug("sendOverdriveSet: calling daemon", "value", value)
 		start := time.Now()
-		if _, err := api.SendPanelOverdriveSet(value); err != nil {
+		if err := daemon.Err(api.SendPanelOverdriveSet(value)); err != nil {
 			w.reportError("Set panel overdrive", err)
 			return
 		}
@@ -267,7 +268,7 @@ func (w *Window) sendBootSoundSet(value int) {
 	go func() {
 		slog.Debug("sendBootSoundSet: calling daemon", "value", value)
 		start := time.Now()
-		if _, err := api.SendBootSoundSet(value); err != nil {
+		if err := daemon.Err(api.SendBootSoundSet(value)); err != nil {
 			w.reportError("Set boot sound", err)
 			return
 		}
