@@ -7,8 +7,10 @@ Flow Z13 via the `z13ctl` daemon. It slides in from the right edge of the screen
 Armoury Crate button (KEY_PROG3) is pressed. The daemon broadcasts `gui-toggle` events over
 a subscribe socket; this GUI listens for them.
 
-It has two display backends:
+It has three display backends:
 - **Layer-shell** (KDE/Wayland): margin-based slide animation
+- **Overlay** (GNOME and any compositor without layer-shell): fullscreen
+  transparent window, drawer right-aligned inside it, click-through everywhere else
 - **Gamescope** (Steam Gaming Mode): X11 overlay via `STEAM_OVERLAY` atom
 
 - Module: `github.com/dahui/z13gui`
@@ -45,6 +47,9 @@ internal/gui/fonts/
   font.go                       Embedded Inter font loading
 internal/gui/layershell/
   layershell.go                 Layer-shell display backend (KDE/Wayland)
+internal/gui/overlay/
+  overlay.go                    Fullscreen transparent click-through backend
+                                (GNOME/Mutter and anything without layer-shell)
 internal/gui/gamepad/
   gamepad.go                    evdev gamepad reader; device classification + EVIOCGRAB
   steam.go                      Steam PID discovery; drives the hidraw blocker
@@ -73,6 +78,7 @@ internal/keyrepeat/             Tracker: which held direction owns the gamepad a
 internal/colorconv/             hex <-> HSL/RGB conversion and colour validation
 internal/lighting/              RGB mode resolution, per-mode controls, defaults
 internal/uiscale/               Gamescope UI scale factor (cannot live in the cgo package)
+internal/panelgeom/             Overlay backend panel rectangle + slide interpolation
 internal/startup/               CLI arg scanning + split-level slog handler
 internal/togglegate/            Debounce helper for duplicate gui-toggle bursts
 contrib/
@@ -82,6 +88,18 @@ contrib/
 
 ## Key architectural decisions
 
+- **Never call into gtk4-layer-shell without checking `IsSupported()` first.**
+  `zwlr_layer_shell_v1` is a **wlroots** extension, not part of `wayland-protocols`:
+  KWin, Hyprland and Sway implement it, GNOME's Mutter never has and has no plan to.
+  Installing `gtk4-layer-shell` does not help — that is the *client* library; the
+  protocol has to come from the compositor. The failure is silent, which is what
+  made issue #16 hard: `gtk_layer_init_for_window` logs one `G_LOG_LEVEL_WARNING`
+  and returns, then every `SetLayer`/`SetAnchor`/`SetMargin`/`SetMonitor`/
+  `SetKeyboardMode` warns once and no-ops. Nothing aborts, so the drawer came up
+  as an unanchored window — and since the anchors were the only thing supplying a
+  height, it collapsed to a ~320px box in the middle of the screen. `gui.go`'s
+  `layerShellUsable()` gates this, and checks the GDK backend *before* calling
+  `IsSupported()`, which asserts on a non-Wayland display.
 - **Layer-shell** (KDE): `github.com/diamondburned/gotk4-layer-shell/pkg/gtk4layershell`
   (NOT `gtklayershell` which is GTK3). pkg-config name: `gtk4-layer-shell-0`.
 - **Anchor**: right + top + bottom edges. Top/bottom margins set to 5% of screen height

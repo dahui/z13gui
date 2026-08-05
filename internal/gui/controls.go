@@ -31,6 +31,36 @@ func addTouchActivate(widget gtk.Widgetter, onTap func()) {
 	gtk.BaseWidget(widget).AddController(gesture)
 }
 
+// scrollMinContentHeight is the floor every view's scroller reports. It matches
+// .fan-curve-area's min-height so the custom view's chart is never the thing
+// being crushed when the drawer is short.
+const scrollMinContentHeight = 240
+
+// newDrawerScroll returns the vertical scroller every view uses.
+//
+// SetMinContentHeight is the load-bearing call. A GtkScrolledWindow reports a
+// minimum height of 0, and SetVExpand only distributes surplus height rather
+// than requesting any, so with nothing imposing a height from outside the
+// toplevel's natural height collapses to the title row plus the bottom bar —
+// which is the ~320px box in issue #16. Layer-shell hid that for two years by
+// anchoring top and bottom, and gamescope hid it by going fullscreen; neither
+// is a height the widget tree ever asked for.
+//
+// Deliberately not SetPropagateNaturalHeight(true): that would make the custom
+// view (eight fan-curve points, three TDP sliders, telemetry) request a natural
+// height taller than the screen, trading no default size for a bad one.
+//
+// The three views shared five identical lines before this existed, which is the
+// shape of bug where a fix lands on two call sites out of three.
+func newDrawerScroll(child gtk.Widgetter) *gtk.ScrolledWindow {
+	scroll := gtk.NewScrolledWindow()
+	scroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
+	scroll.SetVExpand(true)
+	scroll.SetMinContentHeight(scrollMinContentHeight)
+	scroll.SetChild(child)
+	return scroll
+}
+
 // buildContent builds the scrolled content box and returns it as the window child.
 // Content, theme view, and color picker view are in a gtk.Stack so views can be
 // swapped for gamepad navigation (and in gamescope where popovers don't work).
@@ -91,10 +121,7 @@ func (w *Window) buildContent() gtk.Widgetter {
 	// Set initial visibility based on default mode (static).
 	w.syncModeVis()
 
-	scroll := gtk.NewScrolledWindow()
-	scroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
-	scroll.SetVExpand(true)
-	scroll.SetChild(inner)
+	scroll := newDrawerScroll(inner)
 	w.mainScroll = scroll
 
 	// Stack with main, theme, and color views — used in both modes.
@@ -211,10 +238,7 @@ func (w *Window) buildThemeView() *gtk.Box {
 	content.SetMarginEnd(12)
 	w.appendThemeChoices(content)
 
-	scroll := gtk.NewScrolledWindow()
-	scroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
-	scroll.SetVExpand(true)
-	scroll.SetChild(content)
+	scroll := newDrawerScroll(content)
 	w.themeScroll = scroll
 	view.Append(scroll)
 	return view

@@ -167,7 +167,20 @@ func (b *Backend) Configure(isVisible func() bool, onDismiss func()) {
 	})
 	b.gtkWin.AddController(key)
 
-	slog.Info("backend", "mode", "layer-shell")
+	// Report what actually happened, not what was attempted. This line used to
+	// be unconditional, so a session where gtk_layer_init_for_window had already
+	// failed still logged a clean "mode=layer-shell" — the single most
+	// misleading line in the diagnostic path, and why issue #16 looked like a
+	// rendering bug rather than a missing protocol. gui.go only builds this
+	// backend when IsSupported() is true, so a false here means the answer
+	// changed underneath us and every anchor and margin call above was a no-op.
+	if !gtk4layershell.IsSupported() {
+		slog.Error("layer-shell became unavailable after the backend was selected; " +
+			"the drawer will not be anchored to the screen edge")
+		return
+	}
+	slog.Info("backend", "mode", "layer-shell",
+		"protocolVersion", gtk4layershell.GetProtocolVersion())
 }
 
 // WrapContent returns the drawer as-is — layer-shell uses the drawer directly

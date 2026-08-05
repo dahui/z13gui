@@ -562,10 +562,7 @@ func (w *Window) buildCustomView() *gtk.Box {
 
 	content.Append(resetRow)
 
-	scroll := gtk.NewScrolledWindow()
-	scroll.SetPolicy(gtk.PolicyNever, gtk.PolicyAutomatic)
-	scroll.SetVExpand(true)
-	scroll.SetChild(content)
+	scroll := newDrawerScroll(content)
 	w.customScroll = scroll
 	view.Append(scroll)
 

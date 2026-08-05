@@ -4,7 +4,9 @@
 // Package gui implements the GTK4 overlay drawer for z13gui.
 // It provides the main Window type that handles daemon state synchronization,
 // GTK widget construction, and theming. Display-mode-specific concerns
-// (layer-shell vs gamescope X11 overlay) are delegated to Backend implementations.
+// (layer-shell, the gamescope X11 overlay, or the fullscreen click-through
+// overlay used where layer-shell is unavailable) are delegated to Backend
+// implementations.
 package gui
 
 import (
@@ -12,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -21,9 +24,11 @@ import (
 	"github.com/dahui/z13gui/internal/gui/gamepad"
 	"github.com/dahui/z13gui/internal/gui/gamescope"
 	"github.com/dahui/z13gui/internal/gui/layershell"
+	"github.com/dahui/z13gui/internal/gui/overlay"
 	"github.com/dahui/z13gui/internal/power"
 	"github.com/dahui/z13gui/internal/theme"
 	"github.com/dahui/z13gui/internal/togglegate"
+	"github.com/diamondburned/gotk4-layer-shell/pkg/gtk4layershell"
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
 	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
@@ -186,6 +191,32 @@ type Window struct {
 	colorFocusItems   []focusItem // focus grid for HSL color picker view
 }
 
+// layerShellUsable reports whether this session can actually use the layer-shell
+// protocol.
+//
+// The GDK backend is checked before asking gtk4-layer-shell, because
+// gtk_layer_is_supported() runs a g_return_val_if_fail on the display being a
+// GdkWaylandDisplay. On X11 that assertion fires and GLib logs it at
+// G_LOG_LEVEL_CRITICAL — so simply calling it would put
+// "assertion 'GDK_IS_WAYLAND_DISPLAY(gdk_display)' failed" in the journal of
+// every X11 session, immediately before z13gui went on to do the right thing.
+// Diagnosing issue #16 was hard enough without the fix adding its own scary
+// line to the logs.
+func layerShellUsable() bool {
+	display := gdk.DisplayGetDefault()
+	if display == nil {
+		slog.Warn("no GDK display available; assuming layer-shell is unusable")
+		return false
+	}
+	// e.g. "GdkWaylandDisplay", "GdkX11Display".
+	if backend := display.TypeFromInstance().Name(); !strings.Contains(backend, "Wayland") {
+		slog.Debug("GDK is not using the Wayland backend, so layer-shell cannot apply",
+			"gdkDisplay", backend)
+		return false
+	}
+	return gtk4layershell.IsSupported()
+}
+
 // New creates the overlay window and attaches it to app. Called from the
 // GTK Activate signal.
 func New(app *gtk.Application) *Window {
@@ -204,10 +235,24 @@ func New(app *gtk.Application) *Window {
 	w.gtkWin = &w.win.Window
 
 	// Select display backend.
-	if w.gamescope {
+	//
+	// Layer-shell is not something every Wayland compositor has: zwlr_layer_shell_v1
+	// is a wlroots extension, not part of wayland-protocols, and GNOME's Mutter has
+	// never implemented it. Calling into gtk4-layer-shell anyway does not fail
+	// loudly — gtk_layer_init_for_window logs one G_LOG_LEVEL_WARNING and every
+	// later anchor/margin call quietly no-ops — so the drawer came up as an
+	// unanchored, unsized box in the middle of the screen (issue #16). Ask first.
+	switch {
+	case w.gamescope:
 		w.backend = gamescope.New(w.win, w.gtkWin, drawerWidth)
-	} else {
+	case layerShellUsable():
 		w.backend = layershell.New(w.win, w.gtkWin, drawerWidth)
+	default:
+		slog.Info("layer-shell unavailable, using the overlay backend "+
+			"(the drawer is drawn in a transparent click-through window instead of "+
+			"anchored to the screen edge)",
+			"desktop", os.Getenv("XDG_CURRENT_DESKTOP"), "session", os.Getenv("XDG_SESSION_TYPE"))
+		w.backend = overlay.New(w.win, w.gtkWin, drawerWidth)
 	}
 
 	w.backend.Configure(w.visible.Load, w.hide)

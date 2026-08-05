@@ -28,19 +28,32 @@ touches HID devices or sysfs directly.
 
 ## Display backends
 
-Two backends are supported, selected automatically based on the session
+Three backends are supported, selected automatically based on the session
 environment:
 
 - **Layer-shell** (KDE Plasma, Hyprland, Sway) — Wayland layer-shell overlay
   with margin-based slide animation and focus-loss dismiss
+- **Overlay** (GNOME, and any compositor without layer-shell) — a fullscreen,
+  transparent window with the drawer against the right edge. Everything outside
+  the drawer is click-through, so the rest of the desktop stays usable
 - **Gamescope** (Steam Gaming Mode) — X11 overlay via the `STEAM_OVERLAY` atom
   with opacity-based visibility and a click-to-dismiss backdrop
+
+!!! note "Why GNOME needs a different backend"
+
+    The layer-shell protocol (`zwlr_layer_shell_v1`) is a wlroots extension, not
+    part of `wayland-protocols`. KWin, Hyprland and Sway implement it; GNOME's
+    Mutter never has, taking the position that panels belong in Shell extensions.
+    Installing `gtk4-layer-shell` does not change this — that library is the
+    *client* side, and the protocol has to come from the compositor. z13gui
+    detects this at startup and uses the overlay backend instead.
 
 ---
 
 ## Requirements
 
-- Wayland compositor with layer-shell support, or gamescope (Steam Gaming Mode)
+- A Wayland compositor (layer-shell is used when available; GNOME and others get
+  the overlay backend), or gamescope (Steam Gaming Mode)
 - GTK 4 and gtk4-layer-shell libraries (see [Installation](installation.md#runtime-dependencies) for distro package names)
 - [z13ctl](https://github.com/dahui/z13ctl) daemon running
 
