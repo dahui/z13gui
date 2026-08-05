@@ -3,7 +3,11 @@
 ## Prerequisites
 
 - Linux kernel (x86_64)
-- Wayland compositor with layer-shell support, or gamescope (Steam Gaming Mode)
+- A Wayland compositor, or gamescope (Steam Gaming Mode). Compositors with
+  layer-shell support (KDE Plasma, Hyprland, Sway) get the drawer as a true
+  edge-anchored panel; GNOME and any other compositor without it get the overlay
+  backend instead, which works but is slightly degraded — see
+  [GNOME support](index.md#gnome-support)
 - [z13ctl](https://github.com/dahui/z13ctl) installed and daemon running
 
 ### Runtime dependencies
@@ -244,6 +248,43 @@ Make sure the z13ctl daemon is running:
 systemctl --user status z13ctl.service
 ```
 
+Then check the log — see the note below on `--user`, which is required.
+
+**Which display backend am I on?**
+
+The startup log names it. Run z13gui from a terminal and read the first lines:
+
+```sh
+z13gui --debug
+```
+
+Look for `backend mode=layer-shell`, `mode=overlay` or `mode=gamescope`. On
+GNOME, `mode=overlay` is expected and correct: Mutter does not implement the
+`zwlr_layer_shell_v1` protocol, so the drawer is drawn as a transparent
+click-through overlay rather than an edge-anchored panel. See
+[GNOME support](index.md#gnome-support) for what that changes.
+
+**The drawer is a small box in the middle of the screen**
+
+This affects v1.3.0 and earlier on GNOME. Those versions called into layer-shell
+without checking whether the compositor implements it; every anchoring call
+silently did nothing, and since the anchors were the only thing giving the drawer
+a height, it collapsed into a small unusable window
+([#16](https://github.com/dahui/z13gui/issues/16)). Upgrade to the latest
+release, which detects this and uses the overlay backend instead.
+
+**Reading the log: `--user` is required**
+
+z13gui runs as a systemd **user** unit (installed to `/usr/lib/systemd/user/` by
+the distro packages), so its output goes to the user journal. Without `--user`,
+`journalctl` searches system units, finds no such unit, and prints
+`-- No entries --` — which looks like the program never ran:
+
+```sh
+journalctl --user -u z13gui -n 50   # correct
+sudo journalctl -u z13gui           # WRONG: reads system units, prints nothing
+```
+
 **Service fails to start**
 
 Check the journal:
@@ -279,4 +320,5 @@ ls "$XDG_RUNTIME_DIR/$GAMESCOPE_WAYLAND_DISPLAY"
 ```
 
 If the socket is missing (stale environment from a previous Gaming Mode session),
-z13gui automatically falls back to Wayland layer-shell mode.
+z13gui automatically falls back to the Wayland path — layer-shell where the
+compositor supports it, the overlay backend otherwise.
