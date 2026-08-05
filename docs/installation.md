@@ -5,8 +5,9 @@
 - Linux kernel (x86_64)
 - A Wayland compositor, or gamescope (Steam Gaming Mode). Compositors with
   layer-shell support (KDE Plasma, Hyprland, Sway) get the drawer as a true
-  edge-anchored panel; GNOME and any other compositor without it get the
-  [overlay backend](index.md#display-backends) instead
+  edge-anchored panel; GNOME and any other compositor without it get the overlay
+  backend instead, which works but is slightly degraded — see
+  [GNOME support](index.md#gnome-support)
 - [z13ctl](https://github.com/dahui/z13ctl) installed and daemon running
 
 ### Runtime dependencies
@@ -260,7 +261,17 @@ z13gui --debug
 Look for `backend mode=layer-shell`, `mode=overlay` or `mode=gamescope`. On
 GNOME, `mode=overlay` is expected and correct: Mutter does not implement the
 `zwlr_layer_shell_v1` protocol, so the drawer is drawn as a transparent
-click-through overlay rather than an edge-anchored panel.
+click-through overlay rather than an edge-anchored panel. See
+[GNOME support](index.md#gnome-support) for what that changes.
+
+**The drawer is a small box in the middle of the screen**
+
+This affects v1.3.0 and earlier on GNOME. Those versions called into layer-shell
+without checking whether the compositor implements it; every anchoring call
+silently did nothing, and since the anchors were the only thing giving the drawer
+a height, it collapsed into a small unusable window
+([#16](https://github.com/dahui/z13gui/issues/16)). Upgrade to the latest
+release, which detects this and uses the overlay backend instead.
 
 **Reading the log: `--user` is required**
 

@@ -8,8 +8,10 @@ GTK4 overlay drawer for [z13ctl](https://github.com/dahui/z13ctl) on Wayland.
 
 `z13gui` is the graphical companion to z13ctl — a slide-out drawer triggered by the
 Armoury Crate button (KEY_PROG3). It renders as a Wayland layer-shell overlay (KDE Plasma,
-Hyprland, Sway) or as a gamescope X11 overlay in Steam Gaming Mode. All hardware
-communication goes through the z13ctl daemon.
+Hyprland, Sway), as a transparent click-through overlay on compositors without layer-shell
+(GNOME — see [GNOME support](https://dahui.github.io/z13gui/#gnome-support)), or as a
+gamescope X11 overlay in Steam Gaming Mode. All hardware communication goes through the
+z13ctl daemon.
 
 ## Install
 
