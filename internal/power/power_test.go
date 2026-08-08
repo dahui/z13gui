@@ -174,154 +174,157 @@ func TestNeedsAdvanced(t *testing.T) {
 	z := DefaultLimits()
 
 	tests := []struct {
-		name    string
-		profile string
-		tdp     api.TDPState
-		want    bool
+		name     string
+		isCustom bool
+		tdp      api.TDPState
+		want     bool
 	}{
 		{
 			// The regression this function exists for: PL1 above the basic
 			// slider's ceiling used to clamp to 70 and report "70 W" while the
 			// hardware ran at 80 W, and a save would then send 70.
-			name:    "sustained above basic ceiling",
-			profile: ProfileCustom,
-			tdp:     api.TDPState{PL1SPL: 80, PL2SPPT: 80, FPPT: 80},
-			want:    true,
+			name:     "sustained above basic ceiling",
+			isCustom: true,
+			tdp:      api.TDPState{PL1SPL: 80, PL2SPPT: 80, FPPT: 80},
+			want:     true,
 		},
 		{
-			name:    "exactly at the basic ceiling is representable",
-			profile: ProfileCustom,
-			tdp:     api.TDPState{PL1SPL: 70, PL2SPPT: 70, FPPT: 70},
-			want:    false,
+			name:     "exactly at the basic ceiling is representable",
+			isCustom: true,
+			tdp:      api.TDPState{PL1SPL: 70, PL2SPPT: 70, FPPT: 70},
+			want:     false,
 		},
 		{
-			name:    "one over the basic ceiling is not",
-			profile: ProfileCustom,
-			tdp:     api.TDPState{PL1SPL: 71, PL2SPPT: 71, FPPT: 71},
-			want:    true,
+			name:     "one over the basic ceiling is not",
+			isCustom: true,
+			tdp:      api.TDPState{PL1SPL: 71, PL2SPPT: 71, FPPT: 71},
+			want:     true,
 		},
 		{
 			// Basic mode applies one value to all three, so differing limits
 			// cannot be shown even when every value is inside the basic range.
 			// Deliberately not 52/71/70 — that is the balanced stock triple and
 			// is covered below as a state the user did not choose.
-			name:    "limits differ below the ceiling",
-			profile: ProfileCustom,
-			tdp:     api.TDPState{PL1SPL: 50, PL2SPPT: 65, FPPT: 60},
-			want:    true,
+			name:     "limits differ below the ceiling",
+			isCustom: true,
+			tdp:      api.TDPState{PL1SPL: 50, PL2SPPT: 65, FPPT: 60},
+			want:     true,
 		},
 		{
-			name:    "only PL2 differs",
-			profile: ProfileCustom,
-			tdp:     api.TDPState{PL1SPL: 50, PL2SPPT: 60, FPPT: 50},
-			want:    true,
+			name:     "only PL2 differs",
+			isCustom: true,
+			tdp:      api.TDPState{PL1SPL: 50, PL2SPPT: 60, FPPT: 50},
+			want:     true,
 		},
 		{
-			name:    "only PL3 differs",
-			profile: ProfileCustom,
-			tdp:     api.TDPState{PL1SPL: 50, PL2SPPT: 50, FPPT: 60},
-			want:    true,
+			name:     "only PL3 differs",
+			isCustom: true,
+			tdp:      api.TDPState{PL1SPL: 50, PL2SPPT: 50, FPPT: 60},
+			want:     true,
 		},
 		{
 			// What a basic save round-trips as: the daemon defaults the blank
 			// PL fields to the single value, so this must stay in basic.
-			name:    "equal triple from a basic save",
-			profile: ProfileCustom,
-			tdp:     api.TDPState{PL1SPL: 45, PL2SPPT: 45, FPPT: 45},
-			want:    false,
+			name:     "equal triple from a basic save",
+			isCustom: true,
+			tdp:      api.TDPState{PL1SPL: 45, PL2SPPT: 45, FPPT: 45},
+			want:     false,
 		},
 		{
 			// APUSPPT/PlatformSPPT are daemon bookkeeping mirrored from PL2 and
 			// are not shown in the drawer, so they must not force advanced.
-			name:    "mirrored APU fields are ignored",
-			profile: ProfileCustom,
-			tdp:     api.TDPState{PL1SPL: 50, PL2SPPT: 50, FPPT: 50, APUSPPT: 70, PlatformSPPT: 70},
-			want:    false,
+			name:     "mirrored APU fields are ignored",
+			isCustom: true,
+			tdp:      api.TDPState{PL1SPL: 50, PL2SPPT: 50, FPPT: 50, APUSPPT: 70, PlatformSPPT: 70},
+			want:     false,
 		},
 		{
-			name:    "zero value is representable",
-			profile: ProfileCustom,
-			tdp:     api.TDPState{},
-			want:    false,
+			name:     "zero value is representable",
+			isCustom: true,
+			tdp:      api.TDPState{},
+			want:     false,
 		},
 
 		// Stock profiles report the firmware's own per-profile PPT defaults,
 		// which differ between limits by design. Those are a starting point for
 		// editing, not settings the user chose, so they must never force the
-		// advanced view — otherwise every stock profile opens it.
+		// advanced view — otherwise every stock profile opens it. isCustom is
+		// false on every stock profile (api.State.InCustomProfile).
 		{
-			name:    "stock balanced defaults do not force advanced",
-			profile: "balanced",
-			tdp:     api.TDPState{PL1SPL: 52, PL2SPPT: 71, FPPT: 70},
-			want:    false,
+			name:     "stock balanced defaults do not force advanced",
+			isCustom: false,
+			tdp:      api.TDPState{PL1SPL: 52, PL2SPPT: 71, FPPT: 70},
+			want:     false,
 		},
 		{
-			name:    "stock quiet defaults do not force advanced",
-			profile: "quiet",
-			tdp:     api.TDPState{PL1SPL: 40, PL2SPPT: 55, FPPT: 55},
-			want:    false,
+			name:     "stock quiet defaults do not force advanced",
+			isCustom: false,
+			tdp:      api.TDPState{PL1SPL: 40, PL2SPPT: 55, FPPT: 55},
+			want:     false,
 		},
 		{
-			name:    "stock performance defaults do not force advanced",
-			profile: "performance",
-			tdp:     api.TDPState{PL1SPL: 70, PL2SPPT: 86, FPPT: 86},
-			want:    false,
+			name:     "stock performance defaults do not force advanced",
+			isCustom: false,
+			tdp:      api.TDPState{PL1SPL: 70, PL2SPPT: 86, FPPT: 86},
+			want:     false,
 		},
 		{
 			// Even a reading above the ceiling stays basic on a stock profile:
 			// it is the firmware's value, not a saved custom one.
-			name:    "stock profile above the ceiling still stays basic",
-			profile: "performance",
-			tdp:     api.TDPState{PL1SPL: 80, PL2SPPT: 90, FPPT: 90},
-			want:    false,
+			name:     "stock profile above the ceiling still stays basic",
+			isCustom: false,
+			tdp:      api.TDPState{PL1SPL: 80, PL2SPPT: 90, FPPT: 90},
+			want:     false,
 		},
 		{
-			name:    "empty profile is not custom",
-			profile: "",
-			tdp:     api.TDPState{PL1SPL: 80, PL2SPPT: 80, FPPT: 80},
-			want:    false,
+			// An equal triple above the ceiling would trip both value checks;
+			// only the isCustom gate keeps it basic.
+			name:     "not custom stays basic even above the ceiling",
+			isCustom: false,
+			tdp:      api.TDPState{PL1SPL: 80, PL2SPPT: 80, FPPT: 80},
+			want:     false,
 		},
 
-		// Saving a fan curve or undervolt flips the daemon's profile to custom
+		// Saving a fan curve or undervolt flips the daemon to a custom profile
 		// by itself, while the power limits stay at the firmware's values. The
-		// profile check alone would then fire on numbers the user never chose.
+		// isCustom check alone would then fire on numbers the user never chose.
 		{
-			name:    "custom fan curve on top of stock balanced limits",
-			profile: ProfileCustom,
-			tdp:     api.TDPState{PL1SPL: 52, PL2SPPT: 71, FPPT: 70},
-			want:    false,
+			name:     "custom fan curve on top of stock balanced limits",
+			isCustom: true,
+			tdp:      api.TDPState{PL1SPL: 52, PL2SPPT: 71, FPPT: 70},
+			want:     false,
 		},
 		{
-			name:    "custom fan curve on top of stock quiet limits",
-			profile: ProfileCustom,
-			tdp:     api.TDPState{PL1SPL: 40, PL2SPPT: 55, FPPT: 55},
-			want:    false,
+			name:     "custom fan curve on top of stock quiet limits",
+			isCustom: true,
+			tdp:      api.TDPState{PL1SPL: 40, PL2SPPT: 55, FPPT: 55},
+			want:     false,
 		},
 		{
-			name:    "custom fan curve on top of stock performance limits",
-			profile: ProfileCustom,
-			tdp:     api.TDPState{PL1SPL: 70, PL2SPPT: 86, FPPT: 86},
-			want:    false,
+			name:     "custom fan curve on top of stock performance limits",
+			isCustom: true,
+			tdp:      api.TDPState{PL1SPL: 70, PL2SPPT: 86, FPPT: 86},
+			want:     false,
 		},
 		{
 			// One watt off the stock table is a deliberate edit, not firmware.
-			name:    "one watt off stock balanced is a user choice",
-			profile: ProfileCustom,
-			tdp:     api.TDPState{PL1SPL: 53, PL2SPPT: 71, FPPT: 70},
-			want:    true,
+			name:     "one watt off stock balanced is a user choice",
+			isCustom: true,
+			tdp:      api.TDPState{PL1SPL: 53, PL2SPPT: 71, FPPT: 70},
+			want:     true,
 		},
 		{
 			// The case the ceiling rule exists for must survive the stock check.
-			name:    "advanced burst limits within the basic ceiling",
-			profile: ProfileCustom,
-			tdp:     api.TDPState{PL1SPL: 65, PL2SPPT: 85, FPPT: 90},
-			want:    true,
+			name:     "advanced burst limits within the basic ceiling",
+			isCustom: true,
+			tdp:      api.TDPState{PL1SPL: 65, PL2SPPT: 85, FPPT: 90},
+			want:     true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := z.NeedsAdvanced(tt.profile, tt.tdp); got != tt.want {
-				t.Errorf("NeedsAdvanced(%q, %+v) = %v, want %v", tt.profile, tt.tdp, got, tt.want)
+			if got := z.NeedsAdvanced(tt.isCustom, tt.tdp); got != tt.want {
+				t.Errorf("NeedsAdvanced(%v, %+v) = %v, want %v", tt.isCustom, tt.tdp, got, tt.want)
 			}
 		})
 	}
@@ -333,17 +336,17 @@ func TestNeedsAdvancedUsesTheDevicesCeiling(t *testing.T) {
 
 	// Well inside the Z13's basic range, but above this device's.
 	tdp := api.TDPState{PL1SPL: 40, PL2SPPT: 40, FPPT: 40}
-	if !o.NeedsAdvanced(ProfileCustom, tdp) {
+	if !o.NeedsAdvanced(true, tdp) {
 		t.Errorf("fictional device: NeedsAdvanced(%+v) = false, want true (over its %dW ceiling)",
 			tdp, o.BasicSliderMax())
 	}
-	if DefaultLimits().NeedsAdvanced(ProfileCustom, tdp) {
+	if DefaultLimits().NeedsAdvanced(true, tdp) {
 		t.Errorf("Z13: NeedsAdvanced(%+v) = true, want false (inside its %dW ceiling)",
 			tdp, DefaultLimits().BasicSliderMax())
 	}
 
 	// And this device's own stock values must not force advanced on it.
-	if o.NeedsAdvanced(ProfileCustom, o.StockProfilePPT["balanced"]) {
+	if o.NeedsAdvanced(true, o.StockProfilePPT["balanced"]) {
 		t.Error("fictional device forced advanced for its own stock balanced values")
 	}
 }

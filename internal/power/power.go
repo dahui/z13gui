@@ -34,8 +34,12 @@ import (
 	"github.com/dahui/z13ctl/api"
 )
 
-// ProfileCustom is the daemon's virtual profile name for user-defined TDP, fan
-// curve and undervolt settings. The stock profiles are firmware-managed.
+// ProfileCustom is the daemon's default custom profile name — the one created
+// implicitly by the first custom TDP, fan curve or undervolt setting made while
+// a firmware profile is active. Since z13ctl v1.3 it is one of several possible
+// custom profiles, so testing a profile name against it no longer answers "do
+// custom settings apply"; use api.State.InCustomProfile for that. The stock
+// profiles are firmware-managed.
 const ProfileCustom = "custom"
 
 // PWM bounds. Unlike the TDP limits these are the hwmon interface's own range,
@@ -227,15 +231,17 @@ func (l Limits) IsStockPPT(t api.TDPState) bool {
 //
 // Only settings the user actually chose count, which takes two checks rather than
 // one. On a stock profile the daemon reports that profile's own PPT defaults,
-// whose limits legitimately differ — balanced is 52/71/70 — so the profile must
-// be custom. But saving a fan curve or an undervolt is enough to flip the daemon
-// to the custom profile on its own, leaving the power limits at the firmware's
-// values, so the reading must also differ from the stock defaults.
+// whose limits legitimately differ — balanced is 52/71/70 — so isCustom must be
+// true (the caller passes api.State.InCustomProfile(), which covers named custom
+// profiles as well as the default "custom"). But saving a fan curve or an
+// undervolt is enough to flip the daemon to a custom profile on its own, leaving
+// the power limits at the firmware's values, so the reading must also differ
+// from the stock defaults.
 //
 // A basic save round-trips as PL1 == PL2 == FPPT, because the daemon defaults the
 // blank PL fields to the single value, so an equal triple never trips this.
-func (l Limits) NeedsAdvanced(profile string, t api.TDPState) bool {
-	if profile != ProfileCustom || l.IsStockPPT(t) {
+func (l Limits) NeedsAdvanced(isCustom bool, t api.TDPState) bool {
+	if !isCustom || l.IsStockPPT(t) {
 		return false
 	}
 	if t.PL1SPL > l.BasicSliderMax() {

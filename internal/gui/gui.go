@@ -477,9 +477,11 @@ func (w *Window) handleGamepadAction(action gamepad.Action) {
 	}
 }
 
-// subscribeLoop runs in a background goroutine. It subscribes to daemon events
-// and dispatches gui-toggle to the GTK main thread via IdleAdd. Reconnects
-// with exponential backoff.
+// subscribeLoop runs in a background goroutine. It subscribes to daemon events,
+// dispatches gui-toggle to the GTK main thread via IdleAdd, and re-reads state
+// on power-source and state-changed so the drawer never shows values another
+// client (CLI, autoswitch, a resume) has already moved. Reconnects with
+// exponential backoff.
 func (w *Window) subscribeLoop() {
 	backoff := time.Second
 	// Debounce state for duplicate gui-toggle bursts. Deliberately a local, not a
@@ -488,7 +490,7 @@ func (w *Window) subscribeLoop() {
 	// Declared outside the reconnect loop so the window survives a reconnect.
 	var lastToggle time.Time
 	for {
-		ch, cancel, err := api.Subscribe([]string{"gui-toggle"})
+		ch, cancel, err := api.Subscribe(api.AllEvents)
 		if err != nil || ch == nil {
 			slog.Info("daemon disconnected, retrying", "backoff", backoff)
 			time.Sleep(backoff)
@@ -500,22 +502,30 @@ func (w *Window) subscribeLoop() {
 		slog.Info("daemon connected")
 		backoff = time.Second
 		for event := range ch {
-			if event != "gui-toggle" {
-				continue
+			switch event {
+			case api.EventGUIToggle:
+				receivedAt := time.Now()
+				lastAccepted, ok := togglegate.Accept(lastToggle, receivedAt, daemonToggleDebounce)
+				if !ok {
+					slog.Debug("gui-toggle suppressed", "since", receivedAt.Sub(lastToggle))
+					continue
+				}
+				lastToggle = lastAccepted
+				slog.Debug("gui-toggle received, dispatching")
+				glib.TimeoutAdd(0, func() bool {
+					w.Toggle()
+					return false
+				})
+				glib.MainContextDefault().Wakeup()
+			case api.EventPowerSource, api.EventStateChanged:
+				// Events carry no payload by design; get-state answers with
+				// current truth. Called inline rather than on a goroutine so a
+				// burst of events refreshes sequentially instead of racing
+				// stale snapshots into IdleAdd; refreshState itself marshals
+				// every widget write to the main thread.
+				slog.Debug("state refresh", "event", event)
+				w.refreshState()
 			}
-			receivedAt := time.Now()
-			lastAccepted, ok := togglegate.Accept(lastToggle, receivedAt, daemonToggleDebounce)
-			if !ok {
-				slog.Debug("gui-toggle suppressed", "since", receivedAt.Sub(lastToggle))
-				continue
-			}
-			lastToggle = lastAccepted
-			slog.Debug("gui-toggle received, dispatching")
-			glib.TimeoutAdd(0, func() bool {
-				w.Toggle()
-				return false
-			})
-			glib.MainContextDefault().Wakeup()
 		}
 		cancel()
 	}

@@ -664,7 +664,7 @@ func (w *Window) syncCustomView() {
 		// runs at 80W. Only ever forced on, never off: once the user unchecks it
 		// that is a deliberate choice to edit in basic terms.
 		if w.tdpAdvancedCheck != nil && !w.tdpAdvancedCheck.Active() &&
-			w.limits.NeedsAdvanced(w.state.Profile, *tdp) {
+			w.limits.NeedsAdvanced(w.state.InCustomProfile(), *tdp) {
 			w.tdpAdvancedCheck.SetActive(true)
 		}
 	}
@@ -695,8 +695,11 @@ func (w *Window) syncCustomView() {
 	if w.uvBox != nil {
 		w.uvBox.SetVisible(w.state.UndervoltAvailable)
 	}
+	// InCustomProfile, not Profile == "custom": named custom profiles (z13ctl
+	// v1.3+) must show their offset too, and the projected Undervolt field
+	// carries the active custom profile's value either way.
 	cpuCO := 0
-	if w.state.Undervolt != nil && w.state.Profile == "custom" {
+	if w.state.Undervolt != nil && w.state.InCustomProfile() {
 		cpuCO = w.state.Undervolt.CPUCO
 	}
 	if w.uvCpuScale != nil {
