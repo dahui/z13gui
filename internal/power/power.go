@@ -75,9 +75,17 @@ type Limits struct {
 	TDPMin        int    // absolute minimum sustained limit
 	TDPMaxSafe    int    // above this the daemon requires the force flag
 	TDPMaxForced  int    // absolute hardware maximum
-	HighTDPMinPWM int    // fan floor while sustained TDP exceeds TDPMaxSafe; 0 = none
+	HighTDPMinPWM int    // FloorCurve's bottom, for display text; 0 = no floor
 	TempMin       int    // fan curve temperature axis, Celsius
 	TempMax       int
+
+	// FloorCurve is the per-point fan floor the daemon enforces while the
+	// sustained limit exceeds TDPMaxSafe. It is a floor *curve*, not a scalar:
+	// the daemon measures each user point against this curve at the point's own
+	// temperature (z13ctl cli.FloorPWMAt), so 50% is enough at idle temperatures
+	// while 80°C requires full speed. Empty = the device has no floor.
+	// Sanitized keeps HighTDPMinPWM equal to this curve's bottom.
+	FloorCurve []api.FanCurvePoint
 
 	// StockProfilePPT holds each stock profile's firmware PPT defaults, used to
 	// tell "the firmware's numbers" from "numbers the user chose". Only the three
@@ -87,17 +95,32 @@ type Limits struct {
 }
 
 // DefaultLimits returns the 2025 ROG Flow Z13 (GZ302) values. These mirror
-// z13ctl's cli.TDPMin / TDPMaxSafe / TDPMaxForced / HighTDPMinPWM and
-// cli.StockProfilePPT.
+// z13ctl's cli.TDPMin / TDPMaxSafe / TDPMaxForced / cli.HighTDPFanCurve and
+// cli.StockProfilePPT. Until the daemon serves them over the API, any change on
+// the daemon side must be copied here by hand — the floor dropped from a flat
+// 80% to this 50%-bottomed ramp in z13ctl v1.3.x and the drawer kept clamping
+// at 80% for a release, which is the drift this comment is warning about.
 func DefaultLimits() Limits {
 	return Limits{
 		Model:         "GZ302",
 		TDPMin:        5,
 		TDPMaxSafe:    75,
 		TDPMaxForced:  93,
-		HighTDPMinPWM: 204, // 80% of PWMMax
+		HighTDPMinPWM: 127, // FloorCurve's bottom: 50% of PWMMax
 		TempMin:       35,
 		TempMax:       105,
+		// cli.HighTDPFanCurve: 50% at idle temperatures, full speed by 80°C.
+		// The ramp is what protects the APU; the bottom is what keeps it quiet.
+		FloorCurve: []api.FanCurvePoint{
+			{Temp: 30, PWM: 127},
+			{Temp: 40, PWM: 127},
+			{Temp: 50, PWM: 140},
+			{Temp: 60, PWM: 165},
+			{Temp: 65, PWM: 190},
+			{Temp: 70, PWM: 215},
+			{Temp: 75, PWM: 235},
+			{Temp: 80, PWM: 255},
+		},
 		StockProfilePPT: map[string]api.TDPState{
 			"quiet":       {PL1SPL: 40, PL2SPPT: 55, FPPT: 55},
 			"balanced":    {PL1SPL: 52, PL2SPPT: 71, FPPT: 70},
@@ -160,14 +183,55 @@ func (l Limits) Sanitized() Limits {
 		l.TempMin, l.TempMax = d.TempMin, d.TempMax
 	}
 
-	// A floor above the hwmon maximum would clamp every curve point to full speed.
+	// The floor group. The curve is authoritative and the scalar is its bottom;
+	// they are repaired together so display text derived from one can never
+	// disagree with clamping derived from the other.
 	if l.HighTDPMinPWM < PWMMin {
 		l.HighTDPMinPWM = PWMMin
 	}
 	if l.HighTDPMinPWM > PWMMax {
 		l.HighTDPMinPWM = PWMMax
 	}
+	l.FloorCurve = sanitizedFloor(l.FloorCurve, l.HighTDPMinPWM)
+	if len(l.FloorCurve) > 0 {
+		l.HighTDPMinPWM = l.FloorCurve[0].PWM
+	}
 	return l
+}
+
+// sanitizedFloor returns a well-formed copy of floor: PWMs inside the hwmon
+// range, temperatures strictly increasing, PWMs non-decreasing. A malformed
+// curve does not say which of its points is the wrong one, so it falls back
+// whole — to a flat floor at the scalar minimum when one is declared, else to
+// no floor at all. An empty floor with a positive scalar is a description from
+// before per-point floors existed (or a daemon serving only the scalar); the
+// flat synthesis keeps the editor holding that line rather than dropping the
+// constraint. Zero scalar with no curve stays "no floor" — zero is legitimate.
+func sanitizedFloor(floor []api.FanCurvePoint, minPWM int) []api.FanCurvePoint {
+	flat := func() []api.FanCurvePoint {
+		if minPWM <= PWMMin {
+			return nil
+		}
+		// A single point is flat everywhere under FloorPWMAt's semantics.
+		return []api.FanCurvePoint{{Temp: 0, PWM: minPWM}}
+	}
+	if len(floor) == 0 {
+		return flat()
+	}
+	out := make([]api.FanCurvePoint, len(floor)) // copy: never mutate the caller's slice
+	copy(out, floor)
+	for i := range out {
+		if out[i].PWM < PWMMin {
+			out[i].PWM = PWMMin
+		}
+		if out[i].PWM > PWMMax {
+			out[i].PWM = PWMMax
+		}
+		if i > 0 && (out[i].Temp <= out[i-1].Temp || out[i].PWM < out[i-1].PWM) {
+			return flat()
+		}
+	}
+	return out
 }
 
 // BasicSliderMax is the ceiling of the drawer's single-slider basic view.
@@ -189,18 +253,58 @@ func (l Limits) ForceRequired(pl1 int) bool {
 	return pl1 > l.TDPMaxSafe
 }
 
-// FanFloorPWM returns the minimum fan PWM the daemon will accept for a curve
-// point given the applied sustained limit, or PWMMin when unconstrained.
+// ActiveFloor returns the floor curve in force for the applied sustained limit:
+// nil while pl1 is at or below TDPMaxSafe, or when the device declares no floor.
 //
-// While pl1 is above TDPMaxSafe the daemon rejects any curve containing a point
-// below HighTDPMinPWM, and refuses a fan reset outright — firmware auto has no
-// floor at all, so releasing the fans there would remove the very protection the
-// power limit requires. Resetting the TDP is the way back out.
+// While the floor is in force the daemon rejects any curve containing a point
+// below the floor at that point's temperature, and refuses a fan reset outright
+// — firmware auto has no floor at all, so releasing the fans there would remove
+// the very protection the power limit requires. Resetting the TDP is the way
+// back out.
+func (l Limits) ActiveFloor(pl1 int) []api.FanCurvePoint {
+	if pl1 <= l.TDPMaxSafe || len(l.FloorCurve) == 0 {
+		return nil
+	}
+	return l.FloorCurve
+}
+
+// FanFloorPWM returns the lowest fan PWM the daemon will accept anywhere on the
+// curve given the applied sustained limit — the active floor's bottom — or
+// PWMMin when unconstrained. Per-point clamping goes through ActiveFloor and
+// FloorPWMAt; this scalar remains for "is a floor in force" gates and for
+// display text about the floor's minimum.
 func (l Limits) FanFloorPWM(pl1 int) int {
-	if pl1 <= l.TDPMaxSafe {
+	if f := l.ActiveFloor(pl1); len(f) > 0 {
+		return f[0].PWM
+	}
+	return PWMMin
+}
+
+// FloorPWMAt evaluates a floor curve at a temperature, mirroring the daemon's
+// semantics exactly (z13ctl cli.FloorPWMAt): below the first point it returns
+// that point's PWM — a floor does not taper off at low temperature — above the
+// last point it returns the last PWM, and between points it interpolates
+// linearly. An empty floor is PWMMin everywhere. The mirroring is the point:
+// what this accepts and what the daemon accepts must be the same set of curves.
+func FloorPWMAt(floor []api.FanCurvePoint, temp int) int {
+	if len(floor) == 0 {
 		return PWMMin
 	}
-	return l.HighTDPMinPWM
+	if temp <= floor[0].Temp {
+		return floor[0].PWM
+	}
+	for i := 1; i < len(floor); i++ {
+		if temp > floor[i].Temp {
+			continue
+		}
+		lo, hi := floor[i-1], floor[i]
+		span := hi.Temp - lo.Temp
+		if span <= 0 {
+			return hi.PWM
+		}
+		return lo.PWM + (hi.PWM-lo.PWM)*(temp-lo.Temp)/span
+	}
+	return floor[len(floor)-1].PWM
 }
 
 // IsStockPPT reports whether a TDP reading matches some stock profile's firmware
@@ -282,7 +386,7 @@ func (l Limits) DefaultCurve() Curve {
 		{Temp: 90, PWM: 220},
 		{Temp: 100, PWM: 255},
 	}
-	l.EnforceCurve(&c, 0, PWMMin)
+	l.EnforceCurve(&c, 0, nil)
 	return c
 }
 
@@ -302,9 +406,13 @@ func (c Curve) String() string {
 //   - PWM never decreases
 //   - every point sits within [minPWM, PWMMax] and [TempMin, TempMax]
 //
-// minPWM comes from FanFloorPWM. Passing the floor in rather than deriving it
-// here keeps the rule in one place and makes the clamping directly testable at
-// both floor settings.
+// floor comes from ActiveFloor: nil when unconstrained, the device's floor
+// curve while a high sustained limit is applied. Each point's PWM is held at or
+// above the floor at that point's own temperature (FloorPWMAt) — the daemon
+// measures curves the same way, so a drag the editor allows is a curve the
+// daemon accepts. Passing the floor in rather than deriving it here keeps the
+// rule in one place and makes the clamping directly testable with and without
+// a floor.
 //
 // The moved point is clamped first so it wins over its neighbours, then the
 // change cascades outward in both directions, then a final pass re-clamps
@@ -316,7 +424,7 @@ func (c Curve) String() string {
 // instead would push its left-hand neighbours below the minimum, and the final
 // clamp would then pile them all onto TempMin — producing duplicate temperatures
 // that are not strictly increasing.
-func (l Limits) EnforceCurve(c *Curve, idx, minPWM int) {
+func (l Limits) EnforceCurve(c *Curve, idx int, floor []api.FanCurvePoint) {
 	if idx < 0 || idx >= len(c) {
 		return
 	}
@@ -327,8 +435,9 @@ func (l Limits) EnforceCurve(c *Curve, idx, minPWM int) {
 		if p.Temp > l.TempMax {
 			p.Temp = l.TempMax
 		}
-		if p.PWM < minPWM {
-			p.PWM = minPWM
+		// Temperature first: the floor depends on where the point ends up.
+		if floorMin := FloorPWMAt(floor, p.Temp); p.PWM < floorMin {
+			p.PWM = floorMin
 		}
 		if p.PWM > PWMMax {
 			p.PWM = PWMMax
@@ -391,6 +500,15 @@ func (l Limits) EnforceCurve(c *Curve, idx, minPWM int) {
 	for i := len(c) - 2; i >= 0; i-- {
 		if c[i].Temp >= c[i+1].Temp {
 			c[i].Temp = c[i+1].Temp - 1
+		}
+	}
+
+	// The re-spread moved temperatures, and the floor depends on temperature, so
+	// re-assert it at the final positions. Raising to a floor that never
+	// decreases with temperature cannot break the non-decreasing PWM order.
+	for i := range c {
+		if floorMin := FloorPWMAt(floor, c[i].Temp); c[i].PWM < floorMin {
+			c[i].PWM = floorMin
 		}
 	}
 }
