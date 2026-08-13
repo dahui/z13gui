@@ -299,6 +299,20 @@ Run with debug logging to see GTK and initialization output:
 z13gui --debug
 ```
 
+**Touchscreen or touchpad stops responding while the drawer is open**
+
+Fixed in 1.4.1. On 1.4.0 and earlier, z13gui could mistake the machine's own
+touchpad and touchscreen for a game controller's touchpad and take exclusive
+access (`EVIOCGRAB`) to them for as long as the drawer was open, which stopped
+touch input reaching the desktop entirely. A stylus was unaffected, and pressing
+`Esc` to dismiss the drawer gave the devices back.
+
+Only users whose account can open those device nodes were affected — normally
+that means membership of the `input` group, since stock udev rules grant the
+session user access to joysticks but not to touch devices.
+
+Upgrade to 1.4.1.
+
 **Gamescope: controller input not suppressed while drawer is open**
 
 Grant BPF capabilities so z13gui can block controller input at the kernel level:
