@@ -64,18 +64,26 @@ func (w *Window) fanFloorPWM() int {
 	return w.limits.FanFloorPWM(w.state.TDP.PL1SPL)
 }
 
-// minPWM is the editor's view of fanFloorPWM, safe when the editor has no parent.
-func (fc *fanCurveEditor) minPWM() int {
-	if fc.w == nil {
-		return power.PWMMin
+// floor is the fan floor curve currently in force, nil when unconstrained or
+// when the editor has no parent window. Like fanFloorPWM it is derived from the
+// daemon's applied state, not the slider position.
+func (fc *fanCurveEditor) floor() []api.FanCurvePoint {
+	if fc.w == nil || fc.w.state == nil || fc.w.state.TDP == nil {
+		return nil
 	}
-	return fc.w.fanFloorPWM()
+	return fc.limits().ActiveFloor(fc.w.state.TDP.PL1SPL)
+}
+
+// pwmPct renders a PWM value as a rounded percentage for display. Plain integer
+// division reads 127 (the 50% floor) as "49%".
+func pwmPct(pwm int) int {
+	return (pwm*100 + power.PWMMax/2) / power.PWMMax
 }
 
 // enforceConstraints repairs the curve after point idx moved. The rules live in
 // internal/power, where they are unit tested.
 func (fc *fanCurveEditor) enforceConstraints(idx int) {
-	fc.limits().EnforceCurve(&fc.points, idx, fc.minPWM())
+	fc.limits().EnforceCurve(&fc.points, idx, fc.floor())
 }
 
 // Coordinate mapping.
@@ -230,10 +238,12 @@ func (fc *fanCurveEditor) draw(cr *cairo.Context, width, height int) {
 	}
 
 	// High-TDP fan floor. While sustained TDP is above the safe max the daemon
-	// rejects any point below this line, and enforceConstraints holds drags at or
-	// above it — drawing it explains why the points will not go lower.
-	if floor := fc.minPWM(); floor > 0 {
-		fy := fc.pwmToY(floor)
+	// rejects any point below this line at that point's temperature, and
+	// enforceConstraints holds drags at or above it — drawing it explains why
+	// the points will not go lower. It is a ramp, not a flat line: the floor
+	// bottoms out at 50% for idle temperatures and reaches full speed by 80°C,
+	// so the line has to show where each temperature's limit actually is.
+	if floor := fc.floor(); len(floor) > 0 {
 		// Same @z13-error token as the error bar and .tdp-warning: this line marks
 		// a limit the daemon enforces, so it should read as the theme's warning
 		// colour rather than a hardcoded red that clashes with light palettes.
@@ -241,13 +251,23 @@ func (fc *fanCurveEditor) draw(cr *cairo.Context, width, height int) {
 		cr.SetSourceRGBA(er, eg, eb, 0.9)
 		cr.SetLineWidth(1.5 * s)
 		cr.SetDash([]float64{6 * s, 3 * s}, 0)
-		cr.MoveTo(fc.chartX, fy)
-		cr.LineTo(fc.chartX+fc.chartW, fy)
+		leftY := fc.pwmToY(power.FloorPWMAt(floor, tLo))
+		cr.MoveTo(fc.chartX, leftY)
+		for _, p := range floor {
+			// Interior knees only; the edges are evaluated at the axis bounds so
+			// the line always spans the full chart, whatever range the floor
+			// curve itself covers.
+			if p.Temp <= tLo || p.Temp >= tHi {
+				continue
+			}
+			cr.LineTo(fc.tempToX(p.Temp), fc.pwmToY(p.PWM))
+		}
+		cr.LineTo(fc.chartX+fc.chartW, fc.pwmToY(power.FloorPWMAt(floor, tHi)))
 		cr.Stroke()
 		cr.SetDash(nil, 0)
 		cr.SetFontSize(fontSize)
-		cr.MoveTo(fc.chartX+4*s, fy-4*s)
-		cr.ShowText(fmt.Sprintf("%d%% min (TDP > %dW)", floor*100/power.PWMMax, fc.limits().TDPMaxSafe))
+		cr.MoveTo(fc.chartX+4*s, leftY-4*s)
+		cr.ShowText(fmt.Sprintf("%d–100%% min (TDP > %dW)", pwmPct(floor[0].PWM), fc.limits().TDPMaxSafe))
 	}
 
 	// Current APU temperature indicator line.
@@ -664,7 +684,7 @@ func (w *Window) syncCustomView() {
 		// runs at 80W. Only ever forced on, never off: once the user unchecks it
 		// that is a deliberate choice to edit in basic terms.
 		if w.tdpAdvancedCheck != nil && !w.tdpAdvancedCheck.Active() &&
-			w.limits.NeedsAdvanced(w.state.Profile, *tdp) {
+			w.limits.NeedsAdvanced(w.state.InCustomProfile(), *tdp) {
 			w.tdpAdvancedCheck.SetActive(true)
 		}
 	}
@@ -695,8 +715,11 @@ func (w *Window) syncCustomView() {
 	if w.uvBox != nil {
 		w.uvBox.SetVisible(w.state.UndervoltAvailable)
 	}
+	// InCustomProfile, not Profile == "custom": named custom profiles (z13ctl
+	// v1.3+) must show their offset too, and the projected Undervolt field
+	// carries the active custom profile's value either way.
 	cpuCO := 0
-	if w.state.Undervolt != nil && w.state.Profile == "custom" {
+	if w.state.Undervolt != nil && w.state.InCustomProfile() {
 		cpuCO = w.state.Undervolt.CPUCO
 	}
 	if w.uvCpuScale != nil {
@@ -728,12 +751,13 @@ func (w *Window) syncFanResetSensitivity() {
 	if w.resetFanBtn == nil {
 		return
 	}
-	floored := w.fanFloorPWM() > 0
+	floorMin := w.fanFloorPWM()
+	floored := floorMin > 0
 	w.resetFanBtn.SetSensitive(!floored)
 	if floored {
 		w.resetFanBtn.SetTooltipText(fmt.Sprintf(
-			"Unavailable while sustained TDP is above %dW — fans must stay at %d%% minimum. Use Reset TDP first.",
-			w.limits.TDPMaxSafe, w.limits.HighTDPMinPWM*100/power.PWMMax))
+			"Unavailable while sustained TDP is above %dW — fans must hold the floor curve shown in the editor (%d%% minimum). Use Reset TDP first.",
+			w.limits.TDPMaxSafe, pwmPct(floorMin)))
 		return
 	}
 	w.resetFanBtn.SetTooltipText("Reset fan curves to firmware auto")
@@ -856,7 +880,7 @@ func (w *Window) saveCustomBoth() {
 		switch {
 		case tdpErr != nil:
 			// TDP first: a rejected TDP is usually why the fan write failed too
-			// (the daemon refuses a curve below the 80% floor while PL1 is high).
+			// (the daemon refuses a curve below the floor curve while PL1 is high).
 			w.reportError("Save TDP", tdpErr)
 		case fanErr != nil:
 			w.reportError("Save fan curve", fanErr)
