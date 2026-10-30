@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/dahui/z13gui/internal/profileinfo"
 	"github.com/dahui/z13gui/internal/theme"
 	"github.com/diamondburned/gotk4/pkg/gdk/v4"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
@@ -669,7 +670,25 @@ var speeds = []string{"slow", "normal", "fast"}
 // buildProfileSection creates the 2x2 profile button grid.
 func (w *Window) buildProfileSection() *gtk.Box {
 	box := gtk.NewBox(gtk.OrientationVertical, 4)
-	box.Append(sectionLabel("PROFILE"))
+
+	header := gtk.NewBox(gtk.OrientationHorizontal, 6)
+	header.SetHAlign(gtk.AlignStart)
+	header.Append(sectionLabel("PROFILE"))
+	hint := gtk.NewButtonWithLabel("(?)")
+	hint.SetHasFrame(false)
+	hint.SetFocusable(false)
+	hint.SetVAlign(gtk.AlignCenter)
+	hint.SetCanTarget(true)
+	hint.SetCursorFromName("help")
+	hint.AddCSSClass("profile-hint")
+	hint.SetTooltipMarkup(profileinfo.Tooltip(nil))
+	hint.ConnectClicked(func() { hint.TriggerTooltipQuery() })
+	motion := gtk.NewEventControllerMotion()
+	motion.ConnectEnter(func(_, _ float64) { hint.TriggerTooltipQuery() })
+	hint.AddController(motion)
+	header.Append(hint)
+	w.profileHint = hint
+	box.Append(header)
 
 	grid := gtk.NewGrid()
 	grid.SetColumnSpacing(4)
@@ -695,6 +714,13 @@ func (w *Window) buildProfileSection() *gtk.Box {
 	}
 
 	box.Append(grid)
+
+	w.profileDesc = gtk.NewLabel("")
+	w.profileDesc.SetHAlign(gtk.AlignStart)
+	w.profileDesc.SetWrap(true)
+	w.profileDesc.AddCSSClass("profile-desc")
+	box.Append(w.profileDesc)
+
 	return box
 }
 

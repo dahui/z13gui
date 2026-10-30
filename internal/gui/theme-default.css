@@ -68,6 +68,27 @@ window.z13-drawer-window {
     color: @z13-text-dim;
 }
 
+/* Profile hint and active-profile description */
+.profile-hint {
+    color: @z13-text-dim;
+    background: transparent;
+    border: none;
+    padding: 0 2px;
+    min-width: 0;
+    min-height: 0;
+    font-size: 0.85em;
+}
+
+.profile-hint:hover {
+    color: @z13-accent;
+    background: transparent;
+}
+
+.profile-desc {
+    color: @z13-text-dim;
+    font-size: 0.85em;
+}
+
 /* Slider value readouts */
 .scale-value {
     color: @z13-text;

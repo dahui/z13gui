@@ -14,6 +14,7 @@ import (
 	"github.com/dahui/z13gui/internal/colorconv"
 	"github.com/dahui/z13gui/internal/daemon"
 	"github.com/dahui/z13gui/internal/lighting"
+	"github.com/dahui/z13gui/internal/profileinfo"
 	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
@@ -107,6 +108,13 @@ func (w *Window) syncProfile() {
 		return
 	}
 	setActiveButton(w.profileBtns, w.state.Profile)
+	if w.profileHint != nil {
+		w.profileHint.SetTooltipMarkup(profileinfo.Tooltip(w.state))
+	}
+	if w.profileDesc != nil {
+		w.profileDesc.SetText(profileinfo.Describe(w.state.Profile, w.state))
+		w.profileDesc.SetVisible(true)
+	}
 }
 
 // syncBattery sets the battery limit scale to match the daemon state.

@@ -112,6 +112,8 @@ type Window struct {
 	speedBtns       map[string]*gtk.Button
 	brightScale     *gtk.Scale
 	profileBtns     map[string]*gtk.Button
+	profileHint     *gtk.Button
+	profileDesc     *gtk.Label
 	battScale       *gtk.Scale
 	overdriveSwitch *gtk.Switch
 	bootSoundSwitch *gtk.Switch

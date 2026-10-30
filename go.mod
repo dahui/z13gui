@@ -1,8 +1,9 @@
 module github.com/dahui/z13gui
 
-go 1.25.0
+go 1.26.10
 
 require (
+	deedles.dev/tray v0.2.0
 	github.com/cilium/ebpf v0.21.0
 	github.com/dahui/z13ctl/api v1.2.0
 	github.com/diamondburned/gotk4-layer-shell/pkg v0.0.0-20240109211357-6efa9f6dc438
@@ -12,7 +13,8 @@ require (
 
 require (
 	github.com/KarpelesLab/weak v0.1.1 // indirect
+	github.com/godbus/dbus/v5 v5.2.4 // indirect
 	go4.org/unsafe/assume-no-moving-gc v0.0.0-20231121144256-b99613f794b6 // indirect
-	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 )

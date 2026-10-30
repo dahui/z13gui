@@ -18,11 +18,17 @@ import (
 	"github.com/dahui/z13gui/internal/gui/gamepad"
 	"github.com/dahui/z13gui/internal/startup"
 	"github.com/dahui/z13gui/internal/theme"
+	z13tray "github.com/dahui/z13gui/internal/tray"
+	"github.com/diamondburned/gotk4/pkg/glib/v2"
 	"github.com/diamondburned/gotk4/pkg/gtk/v4"
 )
 
 // Version is set at link time via -X main.Version=<version>.
 var Version = "dev"
+
+// trayIcon is kept for the lifetime of the process so the StatusNotifierItem
+// and its menu stay reachable while the GTK main loop runs.
+var trayIcon *z13tray.Tray
 
 func main() {
 	// Scan args for our flags before GTK sees them. The flag package cannot be
@@ -113,6 +119,16 @@ func main() {
 			return
 		}
 		win = gui.New(app)
+		if os.Getenv("Z13GUI_NO_TRAY") == "" {
+			var err error
+			trayIcon, err = z13tray.New(z13tray.Options{
+				Toggle: func() { glib.IdleAdd(func() { win.Toggle() }) },
+				Quit:   func() { glib.IdleAdd(func() { app.Quit() }) },
+			})
+			if err != nil {
+				slog.Warn("tray unavailable, continuing without it", "err", err)
+			}
+		}
 	})
 	os.Exit(app.Run(args.GTKArgs))
 }
