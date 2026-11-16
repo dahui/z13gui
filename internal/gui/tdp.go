@@ -461,7 +461,9 @@ func (w *Window) buildCustomView() *gtk.Box {
 
 	// Basic TDP box (visible by default).
 	tdpBasicBox := gtk.NewBox(gtk.OrientationVertical, 4)
-	w.tdpBasicScale = gtk.NewScaleWithRange(gtk.OrientationHorizontal, float64(w.limits.TDPMin), float64(w.limits.BasicSliderMax()), 1)
+	// Ranges here are only the starting point: syncCustomView re-ranges every
+	// slider from the daemon's tdp_limits (applyTdpRanges).
+	w.tdpBasicScale = gtk.NewScaleWithRange(gtk.OrientationHorizontal, float64(w.limits.PL1.Min), float64(w.limits.BasicSliderMax()), 1)
 	w.tdpBasicScale.SetDigits(0)
 	w.tdpBasicScale.SetDrawValue(false)
 	w.tdpBasicScale.SetValue(float64(50))
@@ -469,7 +471,7 @@ func (w *Window) buildCustomView() *gtk.Box {
 	w.tdpBasicLabel = gtk.NewLabel("50 W")
 	w.tdpBasicLabel.AddCSSClass("scale-value")
 	w.tdpBasicScale.ConnectValueChanged(func() {
-		w.tdpBasicLabel.SetLabel(fmt.Sprintf("%d W", int(w.tdpBasicScale.Value())))
+		w.tdpBasicLabel.SetLabel(w.basicTdpLabel(int(w.tdpBasicScale.Value())))
 	})
 	tdpBasicBox.Append(w.tdpBasicScale)
 	tdpBasicBox.Append(w.tdpBasicLabel)
@@ -479,17 +481,15 @@ func (w *Window) buildCustomView() *gtk.Box {
 	w.tdpAdvancedBox = gtk.NewBox(gtk.OrientationVertical, 4)
 	w.tdpAdvancedBox.SetVisible(false)
 
-	w.tdpWarningLabel = gtk.NewLabel(fmt.Sprintf(
-		"WARNING: Values above %dW may cause thermal throttling, instability, or hardware damage. Use at your own risk — we are not responsible for any damages.",
-		w.limits.TDPMaxSafe))
+	w.tdpWarningLabel = gtk.NewLabel(tdpWarningText(w.limits.TDPMaxSafe))
 	w.tdpWarningLabel.SetWrap(true)
 	w.tdpWarningLabel.SetHAlign(gtk.AlignStart)
 	w.tdpWarningLabel.AddCSSClass("tdp-warning")
 	w.tdpAdvancedBox.Append(w.tdpWarningLabel)
 
-	w.tdpPL1Scale, w.tdpPL1Label = w.buildTdpScale("PL1 (SPL)", "Sustained power limit — the long-term average power the CPU targets.")
-	w.tdpPL2Scale, w.tdpPL2Label = w.buildTdpScale("PL2 (SPPT)", "Short boost — maximum power during brief burst workloads.")
-	w.tdpPL3Scale, w.tdpPL3Label = w.buildTdpScale("PL3 (FPPT)", "Fast boost — peak instantaneous power for single-threaded spikes.")
+	w.tdpPL1Scale, w.tdpPL1Label = w.buildTdpScale("PL1 (SPL)", "Sustained power limit — the long-term average power the CPU targets.", w.limits.PL1)
+	w.tdpPL2Scale, w.tdpPL2Label = w.buildTdpScale("PL2 (SPPT)", "Short boost — maximum power during brief burst workloads.", w.limits.PL2)
+	w.tdpPL3Scale, w.tdpPL3Label = w.buildTdpScale("PL3 (FPPT)", "Fast boost — peak instantaneous power for single-threaded spikes.", w.limits.PL3)
 
 	// --- UNDERVOLT (inside advanced box) ---
 	w.uvBox = gtk.NewBox(gtk.OrientationVertical, 4)
@@ -589,9 +589,11 @@ func (w *Window) buildCustomView() *gtk.Box {
 	return view
 }
 
-// buildTdpScale creates a labeled TDP slider (5–93W) and appends it to the
-// advanced box. Returns the scale and value label.
-func (w *Window) buildTdpScale(label, desc string) (*gtk.Scale, *gtk.Label) {
+// buildTdpScale creates a labeled TDP slider over r and appends it to the
+// advanced box. Returns the scale and value label. Each limit has its own range
+// — on asus-armoury PL1 28–80, PL2 32–92, PL3 45–93 W — and applyTdpRanges
+// keeps them in step with the daemon.
+func (w *Window) buildTdpScale(label, desc string, r api.TDPRange) (*gtk.Scale, *gtk.Label) {
 	nameLabel := gtk.NewLabel(label)
 	nameLabel.SetHAlign(gtk.AlignStart)
 	nameLabel.AddCSSClass("scale-name")
@@ -601,7 +603,7 @@ func (w *Window) buildTdpScale(label, desc string) (*gtk.Scale, *gtk.Label) {
 	descLabel.SetWrap(true)
 	descLabel.AddCSSClass("scale-value")
 	w.tdpAdvancedBox.Append(descLabel)
-	sc := gtk.NewScaleWithRange(gtk.OrientationHorizontal, float64(w.limits.TDPMin), float64(w.limits.TDPMaxForced), 1)
+	sc := gtk.NewScaleWithRange(gtk.OrientationHorizontal, float64(r.Min), float64(r.Max), 1)
 	sc.SetDigits(0)
 	sc.SetDrawValue(false)
 	sc.SetValue(50)
@@ -614,6 +616,44 @@ func (w *Window) buildTdpScale(label, desc string) (*gtk.Scale, *gtk.Label) {
 	w.tdpAdvancedBox.Append(sc)
 	w.tdpAdvancedBox.Append(valLabel)
 	return sc, valLabel
+}
+
+// tdpWarningText is the advanced view's warning above the safe sustained limit.
+func tdpWarningText(safeMax int) string {
+	return fmt.Sprintf(
+		"WARNING: Values above %dW may cause thermal throttling, instability, or hardware damage. Use at your own risk — we are not responsible for any damages.",
+		safeMax)
+}
+
+// basicTdpLabel formats the basic slider's readout. When the daemon would raise
+// PL2 or PL3 to their kernel minimums for this value (asus-armoury: a basic
+// 30 W is written as 30/32/45), the raised boost limits are shown too —
+// otherwise the only place that raise is reported is the daemon's journal.
+func (w *Window) basicTdpLabel(watts int) string {
+	r := w.limits.ResolveBasic(watts)
+	if r.PL2SPPT == watts && r.FPPT == watts {
+		return fmt.Sprintf("%d W", watts)
+	}
+	return fmt.Sprintf("%d W · boost %d/%d W", watts, r.PL2SPPT, r.FPPT)
+}
+
+// applyTdpRanges re-ranges the TDP sliders from w.limits. Call it before
+// setting their values: SetRange clamps whatever value a slider holds into the
+// new range, and only the SetValue that follows puts the daemon's reading back.
+func (w *Window) applyTdpRanges() {
+	set := func(sc *gtk.Scale, lo, hi int) {
+		if sc != nil {
+			sc.SetRange(float64(lo), float64(hi))
+		}
+	}
+	l := w.limits
+	set(w.tdpBasicScale, l.PL1.Min, l.BasicSliderMax())
+	set(w.tdpPL1Scale, l.PL1.Min, l.PL1.Max)
+	set(w.tdpPL2Scale, l.PL2.Min, l.PL2.Max)
+	set(w.tdpPL3Scale, l.PL3.Min, l.PL3.Max)
+	if w.tdpWarningLabel != nil {
+		w.tdpWarningLabel.SetLabel(tdpWarningText(l.TDPMaxSafe))
+	}
 }
 
 // buildUvScale creates a labeled undervolt slider and appends it to uvBox.
@@ -654,16 +694,26 @@ func (w *Window) syncCustomView() {
 	w.syncing = true
 	defer func() { w.syncing = prev }()
 
+	// Power limit ranges. The daemon reports what the kernel accepts in every
+	// get-state (z13ctl v1.4+), and the ranges can change with the power source,
+	// so they are adopted on every full sync — this is the one place they are.
+	// Absent (older daemon, EC not answering since resume) keeps the last ones.
+	// The telemetry poll deliberately does not re-range: doing so every second
+	// could yank a slider out from under a drag.
+	if w.state.TDPLimits != nil {
+		w.limits = w.limits.WithTDPLimits(w.state.TDPLimits)
+		slog.Debug("tdp limits", "backend", w.state.TDPLimits.Backend,
+			"pl1", w.limits.PL1, "pl2", w.limits.PL2, "pl3", w.limits.PL3, "safeMax", w.limits.TDPMaxSafe)
+	}
+	w.applyTdpRanges()
+
 	// TDP.
 	if w.state.TDP != nil {
 		tdp := w.state.TDP
 		if w.tdpBasicScale != nil {
-			v := float64(tdp.PL1SPL)
-			if m := float64(w.limits.BasicSliderMax()); v > m {
-				v = m
-			}
-			w.tdpBasicScale.SetValue(v)
-			w.tdpBasicLabel.SetLabel(fmt.Sprintf("%d W", int(v)))
+			v := max(w.limits.PL1.Min, min(tdp.PL1SPL, w.limits.BasicSliderMax()))
+			w.tdpBasicScale.SetValue(float64(v))
+			w.tdpBasicLabel.SetLabel(w.basicTdpLabel(v))
 		}
 		if w.tdpPL1Scale != nil {
 			w.tdpPL1Scale.SetValue(float64(tdp.PL1SPL))
@@ -777,7 +827,6 @@ func (w *Window) readTdpRequest() tdpRequest {
 	if w.tdpAdvancedCheck != nil && w.tdpAdvancedCheck.Active() {
 		pl1v, pl2v, pl3v := w.tdpPL1Scale.Value(), w.tdpPL2Scale.Value(), w.tdpPL3Scale.Value()
 		pl1 := fmt.Sprintf("%d", int(pl1v))
-		maxPL := int(math.Max(pl1v, math.Max(pl2v, pl3v)))
 		return tdpRequest{
 			// watts doubles as the base value; the daemon parses it before it looks
 			// at the PL fields and rejects the request outright if it is empty.
@@ -785,7 +834,9 @@ func (w *Window) readTdpRequest() tdpRequest {
 			pl1:   pl1,
 			pl2:   fmt.Sprintf("%d", int(pl2v)),
 			pl3:   fmt.Sprintf("%d", int(pl3v)),
-			force: w.limits.ForceRequired(maxPL),
+			// Only PL1 is gated on force by the daemon; PL2/PL3 are bounded by
+			// their own kernel ranges, which the sliders already enforce.
+			force: w.limits.ForceRequired(int(pl1v)),
 		}
 	}
 	return tdpRequest{watts: fmt.Sprintf("%d", int(w.tdpBasicScale.Value()))}
@@ -926,6 +977,11 @@ func (w *Window) saveUndervolt() {
 	go func() {
 		if err := daemon.Err(api.SendUndervoltSet(cpu)); err != nil {
 			w.reportError("Save undervolt", err)
+			// Since z13ctl v1.4 undervolt_available stays true until the first
+			// write probes whether this ryzen_smu build supports Curve Optimizer,
+			// so a failed save is exactly when it can turn false. Refresh so the
+			// controls hide now rather than on the next open.
+			w.refreshState()
 			return
 		}
 		w.clearErrorAsync()

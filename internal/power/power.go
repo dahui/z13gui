@@ -16,12 +16,17 @@
 // limits and per-profile PPT defaults. DefaultLimits returns the 2025 Flow Z13's
 // values, which are correct for the only device supported today.
 //
-// The daemon does not yet serve its limits over the API — they live in z13ctl's
-// internal/cli, which is not exported through the api module, so they have to be
-// duplicated here for now. When that API lands the only change is where the
-// Limits value comes from: fetch once at startup, Sanitized, falling back to
-// DefaultLimits. Nothing else in the drawer moves. See the design brief in
-// z13ctl's .claude/plans/device-limits-api.md.
+// The power limit ranges are served by the daemon: since z13ctl v1.4 (api
+// v1.3.0) get-state carries api.TDPLimits, the per-limit ranges the running
+// kernel accepts, which WithTDPLimits merges in. They are live values — on
+// asus-armoury they come from the kernel and can differ on battery — so the
+// drawer adopts them from every full state sync rather than once at startup.
+// When the field is absent (an older daemon, no PPT interface, or an EC that has
+// not answered since resume) the previous ranges are kept.
+//
+// Everything else — the fan floor curve, the temperature axis, the stock PPT
+// table — still lives only in z13ctl's internal/cli and is duplicated here by
+// hand. Any change on the daemon side must be copied.
 //
 // If the two ever disagree the daemon wins: it validates against hardware, and
 // these rules only exist so the UI does not present an option that gets rejected.
@@ -71,12 +76,20 @@ const CurvePoints = 8
 // rather than a field because "cap the simple slider a little under the safe max"
 // is the drawer's choice; only the safe max itself is a device fact.
 type Limits struct {
-	Model         string // e.g. "GZ302EA"; for logs and bug reports
-	TDPMin        int    // absolute minimum sustained limit
-	TDPMaxSafe    int    // above this the daemon requires the force flag
-	TDPMaxForced  int    // absolute hardware maximum
-	HighTDPMinPWM int    // FloorCurve's bottom, for display text; 0 = no floor
-	TempMin       int    // fan curve temperature axis, Celsius
+	Model string // e.g. "GZ302EA"; for logs and bug reports
+
+	// PL1, PL2 and PL3 are the ranges the kernel accepts for each power limit
+	// (api.TDPLimits). The daemon refuses a PL1 outside its range and raises a
+	// PL2 or PL3 below its minimum to that minimum (ResolveBasic mirrors this).
+	// On asus-armoury the GZ302EA reports PL1 28–80, PL2 32–92, PL3 45–93 W.
+	PL1, PL2, PL3 api.TDPRange
+
+	// TDPMaxSafe is the daemon's policy, not the kernel's: above it PL1 needs
+	// the force flag and brings the fan floor. It may exceed PL1.Max.
+	TDPMaxSafe int
+
+	HighTDPMinPWM int // FloorCurve's bottom, for display text; 0 = no floor
+	TempMin       int // fan curve temperature axis, Celsius
 	TempMax       int
 
 	// FloorCurve is the per-point fan floor the daemon enforces while the
@@ -95,17 +108,26 @@ type Limits struct {
 }
 
 // DefaultLimits returns the 2025 ROG Flow Z13 (GZ302) values. These mirror
-// z13ctl's cli.TDPMin / TDPMaxSafe / TDPMaxForced / cli.HighTDPFanCurve and
-// cli.StockProfilePPT. Until the daemon serves them over the API, any change on
-// the daemon side must be copied here by hand — the floor dropped from a flat
-// 80% to this 50%-bottomed ramp in z13ctl v1.3.x and the drawer kept clamping
-// at 80% for a release, which is the drift this comment is warning about.
+// z13ctl's cli.LegacyPPTLimits / TDPMaxSafe / cli.HighTDPFanCurve and
+// cli.StockProfilePPT. The fan floor and stock table are not served over the
+// API, so any change on the daemon side must be copied here by hand — the floor
+// dropped from a flat 80% to this 50%-bottomed ramp in z13ctl v1.3.x and the
+// drawer kept clamping at 80% for a release, which is the drift this comment is
+// warning about.
+//
+// The power limit ranges are the asus-nb-wmi interface's 5–93 W, the same
+// fallback the daemon itself uses with no limits to hand. They hold until a
+// get-state carries api.TDPLimits (WithTDPLimits): a daemon older than z13ctl
+// v1.4 only ever writes asus-nb-wmi, so for it they are exact; for a newer one
+// on asus-armoury they are replaced on the first sync.
 func DefaultLimits() Limits {
+	legacy := api.TDPRange{Min: 5, Max: 93}
 	return Limits{
 		Model:         "GZ302",
-		TDPMin:        5,
+		PL1:           legacy,
+		PL2:           legacy,
+		PL3:           legacy,
 		TDPMaxSafe:    75,
-		TDPMaxForced:  93,
 		HighTDPMinPWM: 127, // FloorCurve's bottom: 50% of PWMMax
 		TempMin:       35,
 		TempMax:       105,
@@ -144,14 +166,8 @@ func (l Limits) Sanitized() Limits {
 	if l.Model == "" {
 		l.Model = d.Model
 	}
-	if l.TDPMin <= 0 {
-		l.TDPMin = d.TDPMin
-	}
 	if l.TDPMaxSafe <= 0 {
 		l.TDPMaxSafe = d.TDPMaxSafe
-	}
-	if l.TDPMaxForced <= 0 {
-		l.TDPMaxForced = d.TDPMaxForced
 	}
 	if l.TempMin <= 0 {
 		l.TempMin = d.TempMin
@@ -168,9 +184,27 @@ func (l Limits) Sanitized() Limits {
 	// true together, which a zero check cannot see.
 	//
 	// Each group falls back whole rather than nudging one field, because an
-	// inconsistent triple does not say which of its members is the wrong one.
-	if l.TDPMin >= l.TDPMaxSafe || l.TDPMaxSafe > l.TDPMaxForced {
-		l.TDPMin, l.TDPMaxSafe, l.TDPMaxForced = d.TDPMin, d.TDPMaxSafe, d.TDPMaxForced
+	// inconsistent group does not say which of its members is the wrong one.
+	//
+	// A range is usable when 0 < Min <= Max; an unusable one (including the zero
+	// value, a field the daemon did not send) falls back on its own, since the
+	// three limits are independent. PL1 and TDPMaxSafe are a group: the basic
+	// slider runs from PL1.Min to a little under TDPMaxSafe, so PL1.Min must sit
+	// below it. TDPMaxSafe above PL1.Max is deliberately allowed — the daemon
+	// accepts it (its no-force ceiling is min(SafeMax, PL1.Max)), and rejecting
+	// it here would throw away a kernel's real limits.
+	usable := func(r api.TDPRange) bool { return r.Min > 0 && r.Max >= r.Min }
+	if !usable(l.PL1) {
+		l.PL1 = d.PL1
+	}
+	if !usable(l.PL2) {
+		l.PL2 = d.PL2
+	}
+	if !usable(l.PL3) {
+		l.PL3 = d.PL3
+	}
+	if l.PL1.Min >= l.TDPMaxSafe {
+		l.PL1, l.TDPMaxSafe = d.PL1, d.TDPMaxSafe
 	}
 
 	// The temperature axis has to be wide enough for the curve's points to hold
@@ -234,17 +268,56 @@ func sanitizedFloor(floor []api.FanCurvePoint, minPWM int) []api.FanCurvePoint {
 	return out
 }
 
+// WithTDPLimits returns l with the power limit ranges a daemon reported in
+// get-state, sanitized. A nil t — the field absent, because the daemon predates
+// it, has no PPT interface, or is waiting on the EC after a resume — returns l
+// unchanged: the last ranges known are a better guess than the defaults.
+func (l Limits) WithTDPLimits(t *api.TDPLimits) Limits {
+	if t == nil {
+		return l
+	}
+	l.PL1, l.PL2, l.PL3 = t.PL1, t.PL2, t.PL3
+	l.TDPMaxSafe = t.SafeMax
+	return l.Sanitized()
+}
+
 // BasicSliderMax is the ceiling of the drawer's single-slider basic view.
 //
 // Presentation policy, but derived rather than fixed: it only means anything as
 // "a little under the safe max". A hardcoded 70 would be nonsense on a device
-// whose safe sustained limit is 54.
+// whose safe sustained limit is 54. It never exceeds PL1.Max, which on some
+// kernel could be below the safe max.
 func (l Limits) BasicSliderMax() int {
 	const headroom = 5
-	if m := l.TDPMaxSafe - headroom; m > l.TDPMin {
+	if m := min(l.TDPMaxSafe-headroom, l.PL1.Max); m > l.PL1.Min {
 		return m
 	}
-	return l.TDPMin
+	return l.PL1.Min
+}
+
+// ResolveBasic returns what the daemon writes for a basic-mode save of watts:
+// the same value for all three limits, with PL2 and PL3 raised to their
+// minimums where watts is below them. It mirrors z13ctl's cli.ResolveTDPWith.
+// On asus-armoury a basic 30 W is therefore 30/32/45 — and that raise is not
+// cosmetic: under load the GZ302EA held 32 W, not 30.
+func (l Limits) ResolveBasic(watts int) api.TDPState {
+	return api.TDPState{
+		PL1SPL:  watts,
+		PL2SPPT: max(watts, l.PL2.Min),
+		FPPT:    max(watts, l.PL3.Min),
+	}
+}
+
+// clamp returns t's three displayed limits as the kernel would hold them:
+// each clamped into its range. It mirrors z13ctl's cli.EffectiveTDP, which is
+// what the daemon reports for a stock profile.
+func (l Limits) clamp(t api.TDPState) api.TDPState {
+	c := func(v int, r api.TDPRange) int { return max(r.Min, min(r.Max, v)) }
+	return api.TDPState{
+		PL1SPL:  c(t.PL1SPL, l.PL1),
+		PL2SPPT: c(t.PL2SPPT, l.PL2),
+		FPPT:    c(t.FPPT, l.PL3),
+	}
 }
 
 // ForceRequired reports whether a TDP request needs the force flag, which the
@@ -311,11 +384,16 @@ func FloorPWMAt(floor []api.FanCurvePoint, temp int) int {
 // defaults exactly, meaning the user has not diverged from what the firmware
 // would set on its own.
 //
+// Each row is compared as the kernel would hold it (clamped into the PL ranges),
+// because that is what the daemon writes and reports for a stock profile: a row
+// below asus-armoury's minimums reads back raised.
+//
 // An exact match on a genuinely user-chosen triple is possible but harmless: it
 // only means the drawer offers the basic view for values the basic view would
 // reproduce unchanged.
 func (l Limits) IsStockPPT(t api.TDPState) bool {
-	for _, s := range l.StockProfilePPT {
+	for _, row := range l.StockProfilePPT {
+		s := l.clamp(row)
 		if t.PL1SPL == s.PL1SPL && t.PL2SPPT == s.PL2SPPT && t.FPPT == s.FPPT {
 			return true
 		}
@@ -342,8 +420,13 @@ func (l Limits) IsStockPPT(t api.TDPState) bool {
 // the power limits at the firmware's values, so the reading must also differ
 // from the stock defaults.
 //
-// A basic save round-trips as PL1 == PL2 == FPPT, because the daemon defaults the
-// blank PL fields to the single value, so an equal triple never trips this.
+// A basic save does not always round-trip as an equal triple. The daemon
+// defaults the blank PL fields to the single value, but then raises PL2 and PL3
+// to their kernel minimums (ResolveBasic): on asus-armoury a basic 30 W reads
+// back as 30/32/45. Treating that as "the limits differ" flipped the drawer into
+// the advanced view after every low basic save. So each of PL2 and PL3 counts as
+// basic when it equals PL1 (an equal triple is always shown in basic, whatever
+// the ranges) or equals what ResolveBasic would have written for PL1.
 func (l Limits) NeedsAdvanced(isCustom bool, t api.TDPState) bool {
 	if !isCustom || l.IsStockPPT(t) {
 		return false
@@ -351,7 +434,9 @@ func (l Limits) NeedsAdvanced(isCustom bool, t api.TDPState) bool {
 	if t.PL1SPL > l.BasicSliderMax() {
 		return true
 	}
-	return t.PL1SPL != t.PL2SPPT || t.PL2SPPT != t.FPPT
+	r := l.ResolveBasic(t.PL1SPL)
+	basic := func(v, resolved int) bool { return v == t.PL1SPL || v == resolved }
+	return !basic(t.PL2SPPT, r.PL2SPPT) || !basic(t.FPPT, r.FPPT)
 }
 
 // FanCurveIsCustom reports whether a fan curve reported by the daemon is actually

@@ -19,7 +19,7 @@ It has three display backends:
 ## Companion project: z13ctl
 
 The `z13ctl` daemon (module `github.com/dahui/z13ctl`) is a sibling repo.
-Its `api/` submodule (`github.com/dahui/z13ctl/api`) is published at tag `api/v1.1.7`
+Its `api/` submodule (`github.com/dahui/z13ctl/api`) is published at tag `api/v1.3.0`
 on GitHub.
 
 During local development, a `go.work` file in this repo (if present, gitignored) provides
@@ -165,7 +165,7 @@ contrib/
     it is a background poll, and reporting it every second would overwrite
     whatever error the user was reading.
 - **Daemon calls must not run on the GTK thread**: `api` commands carry a 10s deadline
-  (`commandTimeout`, api v1.1.7), so an inline call freezes the drawer for up to 10s
+  (`commandTimeout`, since api v1.1.7), so an inline call freezes the drawer for up to 10s
   against a wedged daemon. Read widget values on the main thread, then do the socket
   round-trip in a goroutine — see `sendApply()` in `sync.go` for the pattern.
 - **Decisions live outside `internal/gui`; widgets live inside it.** `internal/gui`
@@ -196,21 +196,38 @@ contrib/
   hands the game the same D-pad presses navigating the drawer. `Window.grabGen` is
   incremented on the GTK thread and passed to `gamepad.Reader.SetGrabbed(seq, grab)`,
   which drops superseded requests. Add a sequence to any similar pair.
-- **Device limits are a value, not constants.** `power.Limits` holds the TDP range,
-  fan floor, temperature axis and stock PPT table; `Window.limits` is initialised to
-  `power.DefaultLimits()` (the Z13's values). **No TDP or fan bound may be hardcoded
-  in `internal/gui`** — derive it from `w.limits` / `fc.limits()`, because z13ctl is
-  being extended to devices with different envelopes. The design brief for the
-  eventual daemon-served limits is in z13ctl's `.claude/plans/device-limits-api.md`;
-  when it lands, only where `Window.limits` is assigned changes.
+- **Device limits are a value, not constants.** `power.Limits` holds the per-limit
+  TDP ranges (`PL1`/`PL2`/`PL3`) and `TDPMaxSafe`, the fan floor, temperature axis
+  and stock PPT table; `Window.limits` is initialised to `power.DefaultLimits()`.
+  **No TDP or fan bound may be hardcoded in `internal/gui`** — derive it from
+  `w.limits` / `fc.limits()`, because z13ctl is being extended to devices with
+  different envelopes.
+  - **The TDP ranges are daemon-served.** Since z13ctl v1.4 (api v1.3.0) get-state
+    carries `State.TDPLimits`: the ranges the running kernel accepts. On
+    asus-armoury the GZ302EA reports PL1 28–80, PL2 32–92, PL3 45–93 W; on the
+    legacy asus-nb-wmi interface 5–93 W for each, which is also what
+    `DefaultLimits()` uses. `syncCustomView` is the **single adoption site**:
+    `w.limits.WithTDPLimits(state.TDPLimits)` then `applyTdpRanges()` (re-ranges
+    every slider, under `w.syncing`, before any `SetValue`). It runs on every show
+    and after every operation, because the ranges are live and can change on
+    battery. An absent field (older daemon, no PPT interface, EC not answering
+    since resume) keeps the last ranges. The 1s telemetry poll deliberately does
+    not re-range — it would yank a slider mid-drag.
+  - The daemon **refuses a PL1 outside its range** but **raises PL2/PL3 below their
+    minimum** to it, logging the note only in its journal. `Limits.ResolveBasic`
+    mirrors that raise; the basic slider's label shows it (`30 W · boost 32/45 W`).
+  - The fan floor curve, temperature axis and stock PPT table are still **not**
+    served — they are copied by hand from z13ctl's `internal/cli`.
   - Presentation policy stays derived, not fixed: `BasicSliderMax()` is
-    `TDPMaxSafe - 5`, not a literal 70, because 70 is meaningless on a device whose
-    safe max is 54.
-  - `Sanitized()` replaces zero fields with defaults, for the day a daemon older
-    than the client omits one, **and enforces the ordering/width invariants** that
-    a zero check cannot see: `TDPMin < TDPMaxSafe <= TDPMaxForced`, and a
-    temperature axis at least `CurvePoints-1` wide. Each group falls back whole,
-    because an inconsistent triple does not say which member is wrong. Without the
+    `min(TDPMaxSafe - 5, PL1.Max)`, not a literal 70, because 70 is meaningless on
+    a device whose safe max is 54.
+  - `Sanitized()` replaces zero fields with defaults, for a daemon older than the
+    client that omits one, **and enforces the ordering/width invariants** that a
+    zero check cannot see: each PL range `0 < Min <= Max` (falls back on its own),
+    `PL1.Min < TDPMaxSafe` (falls back as a pair), and a temperature axis at least
+    `CurvePoints-1` wide. `TDPMaxSafe > PL1.Max` is **allowed** — the daemon's own
+    no-force ceiling is `min(SafeMax, PL1.Max)`. Each group falls back whole,
+    because an inconsistent group does not say which member is wrong. Without the
     width check a narrow axis makes `EnforceCurve` emit points below `TempMin` that
     the daemon rejects, and `TempMin == TempMax` divides by zero in the editor's
     coordinate mapping. The invariant was asserted in the tests but not enforced,
@@ -220,16 +237,23 @@ contrib/
   - `power.Curve` is a fixed `[8]` array. If a device ever needs a different point
     count it becomes a slice and the compile-time length guarantee is lost.
 - **High-TDP fan floor**: while sustained PL1 exceeds 75W the daemon rejects any fan
-  curve point below 204 PWM (80%) and refuses a fan reset outright. `fanFloorPWM()`
+  curve point below the floor curve at that point's temperature (`Limits.FloorCurve`,
+  mirroring z13ctl's `cli.HighTDPFanCurve`: 50% PWM up to 40°C, ramping to full speed
+  by 80°C) and refuses a fan reset outright. `fanFloorPWM()`
   derives this from applied daemon state (not slider position); `enforceConstraints`
   clamps drags to it, `fanCurveEditor.draw` renders the floor line, and `resetFanBtn` is
   desensitized with a tooltip pointing at Reset TDP. Both the threshold and the
   floor come from `w.limits`, not from literals.
 - **Basic vs advanced TDP view**: basic mode is one slider applying a single value to
-  all three limits, capped at 70W. `power.NeedsAdvanced` decides whether a state can be
-  shown there; `syncCustomView` force-checks the Advanced box when it cannot. Without
-  that the slider clamps, the label misreports the hardware, and a save sends the
-  clamped value — silently lowering the user's power limit.
+  all three limits, capped at `BasicSliderMax()` (70W on the Z13). `power.NeedsAdvanced`
+  decides whether a state can be shown there; `syncCustomView` force-checks the
+  Advanced box when it cannot. Without that the slider clamps, the label misreports
+  the hardware, and a save sends the clamped value — silently lowering the user's
+  power limit. A basic save does **not** always read back as an equal triple: on
+  asus-armoury a basic 30 W is written as 30/32/45 (PL2/PL3 raised to their minimums),
+  so `NeedsAdvanced` treats PL2/PL3 equal to `ResolveBasic(PL1)` as basic. Before that
+  every low basic save flipped the drawer into advanced on the next sync.
+  `force` is sent only for PL1 above `TDPMaxSafe` — the only limit the daemon gates on it.
 - **Subscribe loop**: background goroutine, exponential backoff reconnect, dispatches
   `Toggle()` onto the GTK main thread via `glib.TimeoutAdd(0, ...)` followed by
   `MainContextDefault().Wakeup()` (the wakeup is required — the loop may deliver an
@@ -370,9 +394,10 @@ type State struct {
     BootSound          int  // 0 or 1
     PanelOverdrive     int  // 0 or 1
     TDP                *TDPState
+    TDPLimits          *TDPLimits  // get-state only; absent on old daemons / wedged EC
     FanCurve           *FanCurveState
     Undervolt          *UndervoltState
-    UndervoltAvailable bool  // true if ryzen_smu is loaded
+    UndervoltAvailable bool  // ryzen_smu loaded; after the first UV write, whether CO works
     Temperature        int   // APU temp, degrees Celsius
     FanRPM             int   // fan1 speed in RPM
 }
@@ -382,7 +407,14 @@ type LightingState struct {
 }
 type TDPState struct {
     PL1SPL int; PL2SPPT int; FPPT int
+    APUSPPT int; PlatformSPPT int  // follow PL2; 0 on asus-armoury
 }
+type TDPLimits struct {
+    Backend string      // "asus-armoury" or "asus-nb-wmi"
+    PL1, PL2, PL3 TDPRange
+    SafeMax int         // PL1 above this needs force + brings the fan floor
+}
+type TDPRange struct { Min, Max int }  // inclusive, watts
 type FanCurveState struct {
     Mode   int              // 0=auto, 1=custom
     Points []FanCurvePoint  // 8 points

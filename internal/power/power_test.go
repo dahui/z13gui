@@ -19,9 +19,10 @@ import (
 func otherDevice() Limits {
 	return Limits{
 		Model:         "FICTIONAL-1",
-		TDPMin:        4,
+		PL1:           api.TDPRange{Min: 4, Max: 45},
+		PL2:           api.TDPRange{Min: 4, Max: 45},
+		PL3:           api.TDPRange{Min: 4, Max: 45},
 		TDPMaxSafe:    30,
-		TDPMaxForced:  45,
 		HighTDPMinPWM: 0, // this device has no high-TDP fan floor
 		TempMin:       40,
 		TempMax:       90,
@@ -35,11 +36,13 @@ func otherDevice() Limits {
 
 func TestDefaultLimitsAreSelfConsistent(t *testing.T) {
 	for _, l := range []Limits{DefaultLimits(), otherDevice()} {
-		if l.TDPMin >= l.TDPMaxSafe {
-			t.Errorf("%s: TDPMin %d not below TDPMaxSafe %d", l.Model, l.TDPMin, l.TDPMaxSafe)
+		if l.PL1.Min >= l.TDPMaxSafe {
+			t.Errorf("%s: PL1.Min %d not below TDPMaxSafe %d", l.Model, l.PL1.Min, l.TDPMaxSafe)
 		}
-		if l.TDPMaxSafe > l.TDPMaxForced {
-			t.Errorf("%s: TDPMaxSafe %d above TDPMaxForced %d", l.Model, l.TDPMaxSafe, l.TDPMaxForced)
+		for name, r := range map[string]api.TDPRange{"PL1": l.PL1, "PL2": l.PL2, "PL3": l.PL3} {
+			if r.Min <= 0 || r.Max < r.Min {
+				t.Errorf("%s: %s range %+v unusable", l.Model, name, r)
+			}
 		}
 		if l.TempMin >= l.TempMax {
 			t.Errorf("%s: TempMin %d not below TempMax %d", l.Model, l.TempMin, l.TempMax)
@@ -48,8 +51,8 @@ func TestDefaultLimitsAreSelfConsistent(t *testing.T) {
 		if got := l.TempMax - l.TempMin; got < CurvePoints {
 			t.Errorf("%s: temperature range %d too narrow for %d points", l.Model, got, CurvePoints)
 		}
-		if b := l.BasicSliderMax(); b <= l.TDPMin || b > l.TDPMaxSafe {
-			t.Errorf("%s: BasicSliderMax %d outside (%d, %d]", l.Model, b, l.TDPMin, l.TDPMaxSafe)
+		if b := l.BasicSliderMax(); b <= l.PL1.Min || b > l.TDPMaxSafe {
+			t.Errorf("%s: BasicSliderMax %d outside (%d, %d]", l.Model, b, l.PL1.Min, l.TDPMaxSafe)
 		}
 	}
 }
@@ -64,9 +67,16 @@ func TestBasicSliderMaxIsDerivedNotFixed(t *testing.T) {
 	}
 	// A device whose safe max leaves no headroom must not produce an inverted
 	// or below-minimum range.
-	tiny := Limits{TDPMin: 5, TDPMaxSafe: 6, TDPMaxForced: 10}
-	if got := tiny.BasicSliderMax(); got < tiny.TDPMin {
-		t.Errorf("tiny BasicSliderMax = %d, below TDPMin %d", got, tiny.TDPMin)
+	tiny := Limits{PL1: api.TDPRange{Min: 5, Max: 10}, TDPMaxSafe: 6}
+	if got := tiny.BasicSliderMax(); got < tiny.PL1.Min {
+		t.Errorf("tiny BasicSliderMax = %d, below PL1.Min %d", got, tiny.PL1.Min)
+	}
+	// A kernel whose PL1 maximum sits below the safe max caps the slider there:
+	// the daemon refuses anything above PL1.Max whatever the safe max says.
+	low := DefaultLimits()
+	low.PL1 = api.TDPRange{Min: 28, Max: 60}
+	if got := low.BasicSliderMax(); got != 60 {
+		t.Errorf("BasicSliderMax with PL1.Max 60 = %d, want 60", got)
 	}
 }
 
@@ -74,7 +84,7 @@ func TestSanitizedFillsUnsetFields(t *testing.T) {
 	d := DefaultLimits()
 	got := Limits{}.Sanitized()
 
-	if got.TDPMin != d.TDPMin || got.TDPMaxSafe != d.TDPMaxSafe || got.TDPMaxForced != d.TDPMaxForced {
+	if got.PL1 != d.PL1 || got.PL2 != d.PL2 || got.PL3 != d.PL3 || got.TDPMaxSafe != d.TDPMaxSafe {
 		t.Errorf("zero Limits did not inherit TDP defaults: %+v", got)
 	}
 	if got.TempMin != d.TempMin || got.TempMax != d.TempMax {
@@ -121,7 +131,7 @@ func TestFanFloorPWM(t *testing.T) {
 		{pl1: 50, want: PWMMin},
 		{pl1: z.TDPMaxSafe, want: PWMMin},              // at the threshold, unconstrained
 		{pl1: z.TDPMaxSafe + 1, want: z.HighTDPMinPWM}, // one over, floor applies
-		{pl1: z.TDPMaxForced, want: z.HighTDPMinPWM},
+		{pl1: z.PL1.Max, want: z.HighTDPMinPWM},
 	} {
 		if got := z.FanFloorPWM(tt.pl1); got != tt.want {
 			t.Errorf("Z13 FanFloorPWM(%d) = %d, want %d", tt.pl1, got, tt.want)
@@ -130,8 +140,8 @@ func TestFanFloorPWM(t *testing.T) {
 
 	// A device declaring no floor must never clamp, even far above its safe max.
 	o := otherDevice()
-	if got := o.FanFloorPWM(o.TDPMaxForced); got != PWMMin {
-		t.Errorf("fictional FanFloorPWM(%d) = %d, want %d (device has no floor)", o.TDPMaxForced, got, PWMMin)
+	if got := o.FanFloorPWM(o.PL1.Max); got != PWMMin {
+		t.Errorf("fictional FanFloorPWM(%d) = %d, want %d (device has no floor)", o.PL1.Max, got, PWMMin)
 	}
 }
 
@@ -195,8 +205,8 @@ func TestActiveFloor(t *testing.T) {
 		t.Errorf("ActiveFloor(%d) = nil, want the floor curve above the threshold", z.TDPMaxSafe+1)
 	}
 	o := otherDevice()
-	if f := o.ActiveFloor(o.TDPMaxForced); f != nil {
-		t.Errorf("fictional ActiveFloor(%d) = %v, want nil (device has no floor)", o.TDPMaxForced, f)
+	if f := o.ActiveFloor(o.PL1.Max); f != nil {
+		t.Errorf("fictional ActiveFloor(%d) = %v, want nil (device has no floor)", o.PL1.Max, f)
 	}
 }
 
@@ -758,11 +768,13 @@ func assertCurveValid(t *testing.T, l Limits, c Curve, floor []api.FanCurvePoint
 // either a curve the daemon rejects or NaN coordinates in the editor.
 func assertLimitsUsable(t *testing.T, l Limits) {
 	t.Helper()
-	if l.TDPMin >= l.TDPMaxSafe {
-		t.Errorf("TDPMin %d not below TDPMaxSafe %d", l.TDPMin, l.TDPMaxSafe)
+	if l.PL1.Min >= l.TDPMaxSafe {
+		t.Errorf("PL1.Min %d not below TDPMaxSafe %d", l.PL1.Min, l.TDPMaxSafe)
 	}
-	if l.TDPMaxSafe > l.TDPMaxForced {
-		t.Errorf("TDPMaxSafe %d above TDPMaxForced %d", l.TDPMaxSafe, l.TDPMaxForced)
+	for name, r := range map[string]api.TDPRange{"PL1": l.PL1, "PL2": l.PL2, "PL3": l.PL3} {
+		if r.Min <= 0 || r.Max < r.Min {
+			t.Errorf("%s range %+v unusable", name, r)
+		}
 	}
 	if got := l.TempMax - l.TempMin; got < CurvePoints-1 {
 		t.Errorf("temperature range %d too narrow for %d points", got, CurvePoints)
@@ -780,8 +792,8 @@ func assertLimitsUsable(t *testing.T, l Limits) {
 			}
 		}
 	}
-	if l.BasicSliderMax() > l.TDPMaxForced {
-		t.Errorf("BasicSliderMax %d above TDPMaxForced %d", l.BasicSliderMax(), l.TDPMaxForced)
+	if b := l.BasicSliderMax(); b < l.PL1.Min || b > l.PL1.Max {
+		t.Errorf("BasicSliderMax %d outside PL1 %+v", b, l.PL1)
 	}
 	if len(l.StockProfilePPT) == 0 {
 		t.Error("StockProfilePPT is empty")
@@ -804,9 +816,11 @@ func TestSanitizedRepairsInconsistentLimits(t *testing.T) {
 		{"temp axis collapsed", Limits{TempMin: 50, TempMax: 50}},
 		{"temp axis too narrow for the curve", Limits{TempMin: 50, TempMax: 55}},
 		{"temp axis exactly one degree short", Limits{TempMin: 40, TempMax: 40 + CurvePoints - 2}},
-		{"safe max below the minimum", Limits{TDPMin: 60, TDPMaxSafe: 30, TDPMaxForced: 90}},
-		{"safe max above the forced max", Limits{TDPMin: 5, TDPMaxSafe: 95, TDPMaxForced: 90}},
-		{"min equals safe max", Limits{TDPMin: 50, TDPMaxSafe: 50, TDPMaxForced: 90}},
+		{"safe max below the minimum", Limits{PL1: api.TDPRange{Min: 60, Max: 90}, TDPMaxSafe: 30}},
+		{"min equals safe max", Limits{PL1: api.TDPRange{Min: 50, Max: 90}, TDPMaxSafe: 50}},
+		{"PL1 range inverted", Limits{PL1: api.TDPRange{Min: 80, Max: 28}}},
+		{"PL2 range zero min", Limits{PL2: api.TDPRange{Min: 0, Max: 92}}},
+		{"PL3 range negative", Limits{PL3: api.TDPRange{Min: -5, Max: -1}}},
 		{"fan floor above the hwmon maximum", Limits{HighTDPMinPWM: 999}},
 		{"fan floor negative", Limits{HighTDPMinPWM: -5}},
 	}
@@ -834,8 +848,8 @@ func TestSanitizedRepairsInconsistentLimits(t *testing.T) {
 	t.Run("consistent limits are untouched", func(t *testing.T) {
 		for _, l := range []Limits{d, otherDevice()} {
 			got := l.Sanitized()
-			if got.TDPMin != l.TDPMin || got.TDPMaxSafe != l.TDPMaxSafe ||
-				got.TDPMaxForced != l.TDPMaxForced ||
+			if got.PL1 != l.PL1 || got.PL2 != l.PL2 || got.PL3 != l.PL3 ||
+				got.TDPMaxSafe != l.TDPMaxSafe ||
 				got.TempMin != l.TempMin || got.TempMax != l.TempMax ||
 				got.HighTDPMinPWM != l.HighTDPMinPWM {
 				t.Errorf("%s: Sanitized altered a consistent value: %+v -> %+v", l.Model, l, got)
@@ -847,11 +861,11 @@ func TestSanitizedRepairsInconsistentLimits(t *testing.T) {
 // TestSanitizedIsIdempotent — a repaired value must not repair further, or the
 // result would depend on how many times it had been through.
 func TestSanitizedIsIdempotent(t *testing.T) {
-	for _, in := range []Limits{{}, {TempMin: 50, TempMax: 50}, {TDPMin: 60, TDPMaxSafe: 30}} {
+	for _, in := range []Limits{{}, {TempMin: 50, TempMax: 50}, {PL1: api.TDPRange{Min: 60, Max: 90}, TDPMaxSafe: 30}} {
 		once := in.Sanitized()
 		twice := once.Sanitized()
-		if once.TDPMin != twice.TDPMin || once.TDPMaxSafe != twice.TDPMaxSafe ||
-			once.TDPMaxForced != twice.TDPMaxForced ||
+		if once.PL1 != twice.PL1 || once.PL2 != twice.PL2 || once.PL3 != twice.PL3 ||
+			once.TDPMaxSafe != twice.TDPMaxSafe ||
 			once.TempMin != twice.TempMin || once.TempMax != twice.TempMax ||
 			once.HighTDPMinPWM != twice.HighTDPMinPWM {
 			t.Errorf("not idempotent: %+v -> %+v -> %+v", in, once, twice)
@@ -872,6 +886,150 @@ func TestEnforceCurveOnNarrowestAcceptedAxis(t *testing.T) {
 			c[idx].Temp = temp
 			l.EnforceCurve(&c, idx, nil)
 			assertCurveValid(t, l, c, nil)
+		}
+	}
+}
+
+// armouryTDPLimits is what z13ctl v1.4 reports in get-state on a GZ302EA whose
+// kernel exposes the power limits through asus-armoury.
+func armouryTDPLimits() *api.TDPLimits {
+	return &api.TDPLimits{
+		Backend: "asus-armoury",
+		PL1:     api.TDPRange{Min: 28, Max: 80},
+		PL2:     api.TDPRange{Min: 32, Max: 92},
+		PL3:     api.TDPRange{Min: 45, Max: 93},
+		SafeMax: 75,
+	}
+}
+
+func TestWithTDPLimits(t *testing.T) {
+	d := DefaultLimits()
+
+	t.Run("absent field keeps the previous ranges", func(t *testing.T) {
+		prev := d.WithTDPLimits(armouryTDPLimits())
+		if got := prev.WithTDPLimits(nil); got.PL1 != prev.PL1 || got.PL2 != prev.PL2 ||
+			got.PL3 != prev.PL3 || got.TDPMaxSafe != prev.TDPMaxSafe {
+			t.Errorf("nil TDPLimits changed the limits: %+v -> %+v", prev, got)
+		}
+	})
+
+	t.Run("armoury ranges are adopted", func(t *testing.T) {
+		a := armouryTDPLimits()
+		got := d.WithTDPLimits(a)
+		if got.PL1 != a.PL1 || got.PL2 != a.PL2 || got.PL3 != a.PL3 || got.TDPMaxSafe != a.SafeMax {
+			t.Errorf("armoury limits not adopted: %+v", got)
+		}
+		// Nothing outside the TDP ranges is touched.
+		if got.TempMin != d.TempMin || got.TempMax != d.TempMax || len(got.FloorCurve) != len(d.FloorCurve) ||
+			len(got.StockProfilePPT) != len(d.StockProfilePPT) {
+			t.Errorf("WithTDPLimits altered non-TDP fields: %+v", got)
+		}
+		if got.BasicSliderMax() != 70 {
+			t.Errorf("armoury BasicSliderMax = %d, want 70", got.BasicSliderMax())
+		}
+		assertLimitsUsable(t, got)
+	})
+
+	t.Run("a malformed range falls back on its own", func(t *testing.T) {
+		a := armouryTDPLimits()
+		a.PL2 = api.TDPRange{Min: 92, Max: 32}
+		got := d.WithTDPLimits(a)
+		if got.PL2 != d.PL2 {
+			t.Errorf("inverted PL2 kept: %+v", got.PL2)
+		}
+		if got.PL1 != a.PL1 || got.PL3 != a.PL3 {
+			t.Errorf("good ranges discarded alongside the bad one: %+v", got)
+		}
+	})
+
+	t.Run("zero safe max falls back to the default", func(t *testing.T) {
+		a := armouryTDPLimits()
+		a.SafeMax = 0
+		if got := d.WithTDPLimits(a); got.TDPMaxSafe != d.TDPMaxSafe {
+			t.Errorf("TDPMaxSafe = %d, want default %d", got.TDPMaxSafe, d.TDPMaxSafe)
+		}
+	})
+
+	// The daemon's no-force ceiling is min(SafeMax, PL1.Max), so a kernel whose
+	// PL1 tops out below the safe max is legitimate and must survive Sanitized.
+	t.Run("PL1 max below the safe max is kept", func(t *testing.T) {
+		a := armouryTDPLimits()
+		a.PL1.Max = 65
+		got := d.WithTDPLimits(a)
+		if got.PL1 != a.PL1 || got.TDPMaxSafe != 75 {
+			t.Errorf("PL1.Max < SafeMax rejected: %+v", got)
+		}
+		assertLimitsUsable(t, got)
+	})
+}
+
+func TestResolveBasic(t *testing.T) {
+	a := DefaultLimits().WithTDPLimits(armouryTDPLimits())
+	for _, tt := range []struct {
+		watts int
+		want  api.TDPState
+	}{
+		{30, api.TDPState{PL1SPL: 30, PL2SPPT: 32, FPPT: 45}}, // both raised
+		{40, api.TDPState{PL1SPL: 40, PL2SPPT: 40, FPPT: 45}}, // only PL3 raised
+		{45, api.TDPState{PL1SPL: 45, PL2SPPT: 45, FPPT: 45}}, // at PL3's minimum
+		{70, api.TDPState{PL1SPL: 70, PL2SPPT: 70, FPPT: 70}},
+	} {
+		if got := a.ResolveBasic(tt.watts); got != tt.want {
+			t.Errorf("armoury ResolveBasic(%d) = %+v, want %+v", tt.watts, got, tt.want)
+		}
+	}
+	// On asus-nb-wmi's 5 W floors nothing is ever raised.
+	if got := DefaultLimits().ResolveBasic(10); got != (api.TDPState{PL1SPL: 10, PL2SPPT: 10, FPPT: 10}) {
+		t.Errorf("legacy ResolveBasic(10) = %+v, want an equal triple", got)
+	}
+}
+
+// The regression the armoury ranges introduced: a basic save below PL3's
+// minimum reads back as an unequal triple, which used to force the advanced
+// view on the next sync.
+func TestNeedsAdvancedUnderArmouryRanges(t *testing.T) {
+	a := DefaultLimits().WithTDPLimits(armouryTDPLimits())
+	for _, tt := range []struct {
+		name string
+		tdp  api.TDPState
+		want bool
+	}{
+		{"basic 30 W read back raised", api.TDPState{PL1SPL: 30, PL2SPPT: 32, FPPT: 45}, false},
+		{"basic 40 W read back raised", api.TDPState{PL1SPL: 40, PL2SPPT: 40, FPPT: 45}, false},
+		{"basic 60 W unraised", api.TDPState{PL1SPL: 60, PL2SPPT: 60, FPPT: 60}, false},
+		{"equal triple stays basic", api.TDPState{PL1SPL: 30, PL2SPPT: 30, FPPT: 30}, false},
+		{"PL2 above its minimum is a choice", api.TDPState{PL1SPL: 30, PL2SPPT: 40, FPPT: 45}, true},
+		{"PL3 above its minimum is a choice", api.TDPState{PL1SPL: 30, PL2SPPT: 32, FPPT: 50}, true},
+		{"raise on one, not the other", api.TDPState{PL1SPL: 40, PL2SPPT: 50, FPPT: 45}, true},
+		{"over the basic ceiling", api.TDPState{PL1SPL: 76, PL2SPPT: 76, FPPT: 76}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := a.NeedsAdvanced(true, tt.tdp); got != tt.want {
+				t.Errorf("NeedsAdvanced(true, %+v) = %v, want %v", tt.tdp, got, tt.want)
+			}
+		})
+	}
+
+	// Under the legacy ranges the same 30/32/45 is not what a basic save
+	// produces, so it is a user choice there.
+	if !DefaultLimits().NeedsAdvanced(true, api.TDPState{PL1SPL: 30, PL2SPPT: 32, FPPT: 45}) {
+		t.Error("legacy ranges: 30/32/45 should need the advanced view")
+	}
+}
+
+// The daemon reports a stock profile's row as the kernel holds it — clamped
+// into the PL ranges — so the stock check must clamp too.
+func TestIsStockPPTComparesTheClampedRow(t *testing.T) {
+	o := otherDevice() // quiet is 10/15/15
+	o.PL3 = api.TDPRange{Min: 20, Max: 45}
+	if !o.IsStockPPT(api.TDPState{PL1SPL: 10, PL2SPPT: 15, FPPT: 20}) {
+		t.Error("clamped quiet row (PL3 raised to 20) not recognised as stock")
+	}
+	// The Z13's rows sit inside armoury's ranges, so nothing moves there.
+	a := DefaultLimits().WithTDPLimits(armouryTDPLimits())
+	for name, row := range a.StockProfilePPT {
+		if !a.IsStockPPT(row) {
+			t.Errorf("armoury: %s row %+v not recognised as stock", name, row)
 		}
 	}
 }
