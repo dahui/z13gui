@@ -12,6 +12,15 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	blockerMapBlockedPids  = "blocked_pids"
+	blockerMapHidrawConfig = "hidraw_config"
+	blockerProgHidrawBlock = "hidraw_block"
+)
+
 // loadBlocker returns the embedded CollectionSpec for blocker.
 func loadBlocker() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_BlockerBytes)
@@ -32,7 +41,7 @@ func loadBlocker() (*ebpf.CollectionSpec, error) {
 //	*blockerMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func loadBlockerObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func loadBlockerObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := loadBlocker()
 	if err != nil {
 		return err

@@ -24,12 +24,13 @@ const (
 	// represents this as Enabled=false, and the drawer needs a selectable button
 	// for it.
 	//
-	// Note the daemon does not preserve the rest of the entry on a per-zone off,
-	// which is the only kind the drawer issues: it stores
-	// LightingState{Enabled: false} with mode, colours, speed and brightness all
-	// zeroed. So re-enabling cannot restore the previous effect, and every field
-	// read out of a disabled state needs a fallback — see ResolveBrightness for
-	// what happens when one does not have it.
+	// A per-zone off, the only kind the drawer issues, keeps the zone's effect
+	// and only clears Enabled on a daemon newer than z13ctl 1.4.2 (z13ctl PR
+	// #31). z13ctl 1.4.2 and earlier instead store LightingState{Enabled: false}
+	// with mode, colours, speed and brightness all zeroed, and a state file
+	// written by one still carries such entries until the zone is next set. So
+	// every field read out of a disabled state still needs a fallback — see
+	// ResolveBrightness for what happens when one does not have it.
 	ModeOff = "off"
 )
 
@@ -99,10 +100,14 @@ func ResolveSpeed(ls api.LightingState) string {
 
 // ResolveBrightness returns the brightness the slider should show.
 //
-// A disabled state carries no meaningful brightness, so it reports the default
-// rather than the stored value. The daemon's per-zone off replaces the whole entry
-// with LightingState{Enabled: false} — every other field zeroed — so the stored
-// value is 0, and 0 is the hardware's "off" level, not merely a dim one.
+// A disabled state reports its stored brightness when that is above zero, and
+// the default otherwise. A daemon newer than z13ctl 1.4.2 keeps a zone's
+// brightness when it is turned off, so re-enabling brings the zone back at the
+// level it had. z13ctl 1.4.2 and earlier replace the whole entry with
+// LightingState{Enabled: false} — every other field zeroed — so the stored value
+// is 0, and 0 is the hardware's "off" level, not merely a dim one. The drawer
+// cannot tell which daemon wrote an entry, and a zone switched off at brightness
+// 0 stores a disabled 0 on both, so a stored 0 always falls back to the default.
 //
 // Without this, turning a zone off and then back on left the keyboard dark: the
 // slider adopted the zero, the next apply sent brightness 0, and the daemon
@@ -115,6 +120,9 @@ func ResolveSpeed(ls api.LightingState) string {
 // and ResolveSpeed already guard against; brightness was simply missed.
 func ResolveBrightness(ls api.LightingState) int {
 	if !ls.Enabled {
+		if ls.Brightness > 0 {
+			return ls.Brightness
+		}
 		return DefaultBrightness
 	}
 	return ls.Brightness

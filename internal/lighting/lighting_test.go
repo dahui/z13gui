@@ -196,8 +196,8 @@ func TestResolveBrightness(t *testing.T) {
 		want int
 	}{
 		{
-			// The exact state z13ctl's per-zone off writes: LightingState{Enabled:
-			// false}, every other field zeroed. Adopting the 0 sent brightness 0 on
+			// The exact state a z13ctl 1.4.2-or-earlier per-zone off writes:
+			// LightingState{Enabled: false}, every other field zeroed. Adopting the 0 sent brightness 0 on
 			// the next apply, which is the hardware's off level — so re-enabling a
 			// zone left the keyboard dark while reporting success.
 			name: "disabled with everything zeroed",
@@ -206,16 +206,18 @@ func TestResolveBrightness(t *testing.T) {
 		},
 		{
 			// Full off preserves the rest of the global entry, so the stored value is
-			// real — but it still must not be adopted while disabled, or the same
-			// trap applies whenever that value happens to be 0.
+			// real — but a stored 0 must not be adopted while disabled, or the same
+			// trap applies: re-enabling would send the hardware's off level.
 			name: "disabled with a stored brightness",
 			ls:   api.LightingState{Enabled: false, Mode: "breathe", Brightness: 0},
 			want: DefaultBrightness,
 		},
 		{
+			// A daemon newer than z13ctl 1.4.2 keeps the zone's brightness on off,
+			// so re-enabling restores the level the zone had.
 			name: "disabled with a non-zero stored brightness",
 			ls:   api.LightingState{Enabled: false, Brightness: 2},
-			want: DefaultBrightness,
+			want: 2,
 		},
 		{
 			name: "enabled passes its value through",
